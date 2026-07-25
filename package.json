@@ -2,7 +2,15 @@
   "name": "pi-local-llm-harness",
   "version": "1.0.0",
   "description": "Build whole projects from scratch with the pi coding agent driven by local LLMs (Ollama / LM Studio)",
-  "keywords": ["pi", "coding-agent", "ollama", "lmstudio", "local-llm", "agentic", "harness"],
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "ollama",
+    "lmstudio",
+    "local-llm",
+    "agentic",
+    "harness"
+  ],
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -19,8 +27,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "prepare": "npm run build",
+    "compile": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "test": "vitest run",
     "test:watch": "vitest",
