@@ -313,6 +313,7 @@ export interface PiModelRegistration {
   maxTokens: number;
   reasoning: boolean;
   compat?: Record<string, boolean> | undefined;
+  thinkingLevelMap?: Record<string, string> | undefined;
 }
 
 export function registerModel(
@@ -353,7 +354,12 @@ export function registerModel(
   provider.baseUrl = reg.baseUrl;
   provider.api = "openai-completions";
   provider.apiKey = provider.apiKey ?? "local";
-  if (reg.compat) provider.compat = { ...provider.compat, ...reg.compat };
+  // The provider definition is authoritative for compat. Merging into whatever
+  // was there before would leave stale flags behind — and a stale
+  // `supportsReasoningEffort: false` silently stops pi from ever sending the
+  // field that turns thinking off.
+  if (reg.compat) provider.compat = { ...reg.compat };
+  else delete provider.compat;
 
   const models = (provider.models ?? []).filter((m) => m["id"] !== reg.modelId);
   models.push({
@@ -363,6 +369,7 @@ export function registerModel(
     contextWindow: reg.contextWindow,
     maxTokens: reg.maxTokens,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    ...(reg.thinkingLevelMap ? { thinkingLevelMap: reg.thinkingLevelMap } : {}),
   });
   provider.models = models;
 

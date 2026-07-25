@@ -183,13 +183,62 @@ export class LMStudioProvider implements Provider {
     return res?.code === 0;
   }
 
+  /**
+   * Does this model actually produce reasoning content?
+   *
+   * pi only applies the thinking-level machinery to models declared
+   * reasoning-capable, so getting this wrong means `--thinking off` is ignored
+   * and the model thinks on every single call. One tiny request settles it.
+   */
+  async supportsReasoning(modelId: string): Promise<boolean> {
+    const res = await fetchJson<{
+      choices?: Array<{ message?: { reasoning_content?: string | null } }>;
+    }>(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: "user", content: "hi" }],
+        max_tokens: 1,
+      }),
+      timeoutMs: 120_000,
+    });
+    const reasoning = res?.choices?.[0]?.message?.reasoning_content;
+    return typeof reasoning === "string";
+  }
+
   async unloadAll(): Promise<boolean> {
     const res = await this.lmsRun(["unload", "--all"], 60);
     return res?.code === 0;
   }
 
-  piCompat(): Record<string, boolean> {
-    return { supportsDeveloperRole: false, supportsReasoningEffort: false };
+  /**
+   * LM Studio implements the OpenAI surface properly: it accepts the
+   * `developer` role and `reasoning_effort` without complaint. Disabling them
+   * (as Ollama needs) would be actively harmful here, because it stops pi from
+   * sending `reasoning_effort` at all — which is the only way to turn thinking
+   * off. Verified against LM Studio 0.3.x.
+   */
+  piCompat(): Record<string, boolean> | undefined {
+    return undefined;
+  }
+
+  /**
+   * pi's "off" must reach the backend as `reasoning_effort: "none"`.
+   *
+   * Measured with qwen3.5-9b: "minimal" and "low" still emit a full reasoning
+   * dump before answering, while "none" returns the answer immediately. On a
+   * laptop that is the difference between a feature taking minutes and taking
+   * seconds.
+   */
+  thinkingLevelMap(): Record<string, string> {
+    return {
+      off: "none",
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+    };
   }
 
   advice(): string[] {

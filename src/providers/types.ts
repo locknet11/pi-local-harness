@@ -80,6 +80,12 @@ export interface Provider {
   /** Extra compatibility flags pi needs for this backend. */
   piCompat(): Record<string, boolean> | undefined;
 
+  /**
+   * Maps pi's thinking levels onto the values this backend understands.
+   * Crucially this is how "off" becomes whatever actually disables reasoning.
+   */
+  thinkingLevelMap?(): Record<string, string> | undefined;
+
   /** Backend-specific advice surfaced by `doctor`. */
   advice(): string[];
 }

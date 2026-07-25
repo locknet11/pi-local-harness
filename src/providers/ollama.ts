@@ -185,9 +185,14 @@ export class OllamaProvider implements Provider {
   }
 
   piCompat(): Record<string, boolean> {
-    // Many OpenAI-compatible servers reject the `developer` role and
-    // `reasoning_effort` that pi sends for reasoning-capable models.
+    // Ollama's OpenAI shim rejects the `developer` role and `reasoning_effort`
+    // that pi sends for reasoning-capable models.
     return { supportsDeveloperRole: false, supportsReasoningEffort: false };
+  }
+
+  /** Not applicable: reasoning_effort is disabled by the compat flags above. */
+  thinkingLevelMap(): undefined {
+    return undefined;
   }
 
   advice(): string[] {

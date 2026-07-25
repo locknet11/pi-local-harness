@@ -328,14 +328,24 @@ async function main(): Promise<number> {
         log.warn(`${provider.displayName} is not running; starting it…`);
         await provider.start();
       }
+      // pi only honours thinking levels for models it believes can reason, so
+      // detect it rather than guessing.
+      let reasoning = config.reasoning;
+      const lms = provider as Partial<{ supportsReasoning(id: string): Promise<boolean> }>;
+      if (typeof lms.supportsReasoning === "function") {
+        reasoning = await lms.supportsReasoning(modelId);
+        log.detail(`reasoning-capable: ${reasoning}`);
+      }
+
       const { backupPath } = registerModel(piModelsJsonPath(), {
         providerName: provider.name,
         baseUrl: provider.baseUrl,
         modelId,
         contextWindow: config.contextLength,
         maxTokens: config.maxOutputTokens,
-        reasoning: config.reasoning,
+        reasoning,
         compat: provider.piCompat(),
+        thinkingLevelMap: provider.thinkingLevelMap?.(),
       });
       if (backupPath) log.detail(`backup: ${backupPath}`);
       log.ok(`Written to ${piModelsJsonPath()}`);
