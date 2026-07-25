@@ -78,6 +78,40 @@ describe("event stream analysis", () => {
     );
     expect(analyzeEvents(events).finalText).toBe("all done");
   });
+
+  // pi exits 0 when every request to the backend failed. Without reading the
+  // stopReason, a 26B model that cannot be loaded looks exactly like a model
+  // that chose not to write anything, and the harness retries it three times.
+  it("reports a turn that ended with a backend error", () => {
+    const events = parseEvents(
+      event({
+        type: "turn_end",
+        message: {
+          role: "assistant",
+          stopReason: "error",
+          errorMessage:
+            '400: {"message":"Failed to load model \\"google/gemma-4-26b\\". Error: Model loading was stopped due to insufficient system resources.","type":"invalid_request_error"}',
+        },
+      }),
+    );
+    const analysis = analyzeEvents(events);
+    expect(analysis.backendError).toBe(
+      "400: Failed to load model \"google/gemma-4-26b\". Error: Model loading was stopped due to insufficient system resources.",
+    );
+    expect(analysis.writeCalls).toBe(0);
+  });
+
+  it("leaves a plain error message alone", () => {
+    const events = parseEvents(
+      event({ type: "turn_end", message: { stopReason: "error", errorMessage: "socket hang up" } }),
+    );
+    expect(analyzeEvents(events).backendError).toBe("socket hang up");
+  });
+
+  it("reports no backend error for a normal turn", () => {
+    const events = parseEvents(event({ type: "turn_end", message: { stopReason: "stop" } }));
+    expect(analyzeEvents(events).backendError).toBe("");
+  });
 });
 
 describe("streaming log size", () => {
@@ -116,6 +150,37 @@ emit({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "tex
     const stored = readFileSync(rawPath, "utf8");
     expect(stored.length).toBeLessThan(20_000);
     expect(stored).not.toContain("message_update");
+  });
+
+  it("prefers the backend's own error over the guessed hints", async () => {
+    // The keyword hints are a guess over raw output, and they do misfire: a
+    // failed model load once came out as "rate limited by the backend". When
+    // the backend actually said what went wrong, that is the only report.
+    const { runPi } = await import("../src/pi.js");
+    const fake = join(dir, "fake-pi-error.cjs");
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node
+const emit = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+emit({ type: "agent_start" });
+emit({ type: "turn_end", message: { role: "assistant", stopReason: "error",
+  errorMessage: '429: {"message":"failed: rate limit reached","type":"error"}' } });
+emit({ type: "agent_settled" });
+`,
+    );
+    chmodSync(fake, 0o755);
+    const result = await runPi("go", {
+      piBin: fake,
+      provider: "fake",
+      model: "fake",
+      cwd: dir,
+      timeoutSeconds: 60,
+      rawPath: join(dir, "err.jsonl"),
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.backendError).toBe("429: failed: rate limit reached");
+    expect(result.hints).toEqual([]);
   });
 });
 

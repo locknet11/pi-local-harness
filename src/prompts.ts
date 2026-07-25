@@ -10,12 +10,15 @@
  *      identical failure; naming the mistake is what breaks the loop.
  */
 
-export function agentsPrompt(agentsFile: string): string {
+export function agentsPrompt(agentsFile: string, stateDir: string): string {
   return `You are the architect of a brand-new project. The repository is EMPTY.
 
 Read the attached brief and write exactly ONE file using the write tool:
-${agentsFile}. Nothing else. Do not write code, do not ask questions, do not
+./${agentsFile}. Nothing else. Do not write code, do not ask questions, do not
 explain.
+
+The path is exactly ./${agentsFile}, at the root of the repository. Do NOT put it
+in ${stateDir}/ beside the brief — that directory belongs to the harness.
 
 ${agentsFile} holds the permanent rules for anyone working in this repo. Keep it
 short and actionable, 60 lines maximum. Include:
@@ -29,9 +32,12 @@ short and actionable, 60 lines maximum. Include:
 Stop as soon as ${agentsFile} is written.`;
 }
 
-export function specPrompt(specFile: string, featureTarget: number): string {
+export function specPrompt(specFile: string, featureTarget: number, stateDir: string): string {
   return `The project already has its AGENTS.md (it is loaded). Now write exactly
-ONE file using the write tool: ${specFile}. Nothing else.
+ONE file using the write tool: ./${specFile}. Nothing else.
+
+The path is exactly ./${specFile}, at the root of the repository — never inside
+${stateDir}/, which belongs to the harness.
 
 This is the backlog. Aim for about ${featureTarget} features ordered by
 dependency: earlier features must never depend on later ones. Each feature must

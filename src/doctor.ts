@@ -75,12 +75,22 @@ export async function diagnose(
       message: `${provider.displayName} is up at ${provider.baseUrl} (${health.detail})`,
     });
     const models = await provider.listModels();
+    const loaded = await provider.listLoaded().catch(() => []);
     const known = models.find((m) => m.id === config.model);
     if (known) {
       backend.push({
         level: "ok",
         message: `model available: ${config.model}${known.sizeBytes ? ` (${formatBytes(known.sizeBytes)}${known.params ? `, ${known.params}` : ""})` : ""}`,
       });
+      // On disk is not the same as runnable: loading it may still be refused
+      // for want of memory, and that only shows up on the first inference.
+      if (!loaded.some((l) => l.id === config.model)) {
+        backend.push({
+          level: "warn",
+          message: `'${config.model}' is not loaded — the backend has to load it on the first request`,
+          hint: `Load it up front to find out now: pi-harness tune-ctx ${config.model}`,
+        });
+      }
     } else if (config.model) {
       backend.push({
         level: "fail",

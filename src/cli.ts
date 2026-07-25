@@ -157,16 +157,35 @@ async function resolveProvider(options: CliOptions, config: HarnessConfig): Prom
   return detected;
 }
 
-/** Pick a model when none was configured: the largest available is the best guess. */
+/**
+ * Pick a model when none was configured.
+ *
+ * A model that is already loaded wins over a bigger one sitting on disk. Size
+ * alone picks models that cannot run: LM Studio refuses to load a 26B model on
+ * a laptop that is already holding a 9B one, and the refusal arrives as a 400
+ * on the first inference — after the interview, minutes into the run.
+ */
 async function resolveModel(provider: Provider, config: HarnessConfig): Promise<string> {
   if (config.model) return config.model;
   const models = await provider.listModels();
   if (models.length === 0) {
     throw new Error(`${provider.displayName} has no models. Download one first.`);
   }
+
+  const loaded = await provider.listLoaded().catch(() => []);
+  const usable = models.filter((m) => loaded.some((l) => l.id === m.id));
+  if (usable.length > 0) {
+    const best = [...usable].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0))[0];
+    if (best) {
+      log.warn(`No model configured; using the one already loaded: ${best.id}`);
+      return best.id;
+    }
+  }
+
   const best = [...models].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0))[0];
   if (!best) throw new Error("No usable model found.");
-  log.warn(`No model configured; using the largest available: ${best.id}`);
+  log.warn(`No model configured and none loaded; using the largest available: ${best.id}`);
+  log.detail(`If it does not fit in memory, pick a smaller one with --model.`);
   return best.id;
 }
 

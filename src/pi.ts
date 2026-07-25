@@ -42,6 +42,8 @@ export interface PiEvent {
     role?: string;
     content?: Array<{ type?: string; text?: string }>;
     usage?: { input?: number; output?: number; totalTokens?: number };
+    stopReason?: string;
+    errorMessage?: string;
   };
   messages?: Array<{ role?: string; content?: Array<{ type?: string; text?: string }> }>;
   willRetry?: boolean;
@@ -57,6 +59,8 @@ export interface PiRunResult {
   totalTokens: number;
   /** Final assistant text, for diagnostics. */
   finalText: string;
+  /** The backend's own error, when a turn ended with stopReason "error". */
+  backendError: string;
   events: PiEvent[];
   rawPath: string;
   /** Provider-side problems worth surfacing (context overflow, refused connection…). */
@@ -91,18 +95,42 @@ export function parseEvents(jsonl: string): PiEvent[] {
   return events;
 }
 
+/**
+ * pi reports a failed request inside the event stream, not through its exit
+ * code: the turn ends with `stopReason: "error"` and an `errorMessage`, and pi
+ * still exits 0. The message body is usually `<status>: <provider JSON>`, whose
+ * only readable part is the inner `message` field.
+ */
+export function readableBackendError(raw: string): string {
+  const match = /^(\d{3}):\s*(\{[\s\S]*\})\s*$/.exec(raw.trim());
+  if (!match?.[2]) return raw.trim();
+  try {
+    const body = JSON.parse(match[2]) as { message?: unknown; error?: { message?: unknown } };
+    const inner = body.error?.message ?? body.message;
+    if (typeof inner === "string" && inner !== "") return `${match[1]}: ${inner}`;
+  } catch {
+    /* not JSON after all — fall through */
+  }
+  return raw.trim();
+}
+
 export function analyzeEvents(events: PiEvent[]): {
   writeCalls: number;
   toolErrors: number;
   totalTokens: number;
   finalText: string;
+  backendError: string;
 } {
   let writeCalls = 0;
   let toolErrors = 0;
   let totalTokens = 0;
   let finalText = "";
+  let backendError = "";
 
   for (const e of events) {
+    if (e.message?.stopReason === "error" && typeof e.message.errorMessage === "string") {
+      backendError = readableBackendError(e.message.errorMessage);
+    }
     if (e.type === "tool_execution_end") {
       if (e.isError === true) toolErrors += 1;
       else if (e.toolName && WRITE_TOOLS.has(e.toolName)) writeCalls += 1;
@@ -115,7 +143,7 @@ export function analyzeEvents(events: PiEvent[]): {
       if (text && text.length > 0) finalText = text.join("\n");
     }
   }
-  return { writeCalls, toolErrors, totalTokens, finalText };
+  return { writeCalls, toolErrors, totalTokens, finalText, backendError };
 }
 
 const HINT_PATTERNS: Array<[RegExp, string]> = [
@@ -249,14 +277,19 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
 
   sink?.end();
 
+  const analysis = analyzeEvents(events);
+
   return {
     code: result.code,
     timedOut: result.timedOut,
     aborted: result.aborted,
-    ...analyzeEvents(events),
+    ...analysis,
     events,
     rawPath: options.rawPath,
-    hints: extractHints(hintBuffer),
+    // The guessed hints are keyword matches over raw output and do misfire; when
+    // the backend told us exactly what went wrong, that is the only thing worth
+    // printing.
+    hints: analysis.backendError === "" ? extractHints(hintBuffer) : [],
   };
 }
 
