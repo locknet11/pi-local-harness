@@ -21,9 +21,8 @@ npm install -g github:locknet11/pi-local-harness
 For local development:
 
 ```bash
-git clone https://github.com/locknet11/pi-local-harness && cd pi-local-harness
-npm install
-npm run compile       # writes dist/ — commit it with your changes
+git clone https://github.com/locknet11/pi-local-harness.git && cd pi-local-harness
+npm install && npm run build
 npm link              # puts `pi-harness` on your PATH
 ```
 
