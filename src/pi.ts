@@ -12,7 +12,14 @@
  * it. The exit code in that case is 0. Counting write-tool calls is the only
  * way to tell the difference.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  createWriteStream,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  type WriteStream,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./proc.js";
@@ -195,6 +202,16 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
   let pending = "";
   let hintBuffer = "";
 
+  // Append kept events as they arrive, so a stalled run can still be watched
+  // with `tail -f` — while staying orders of magnitude smaller than the raw
+  // token-level stream.
+  let sink: WriteStream | null = null;
+  try {
+    sink = createWriteStream(options.rawPath, { flags: "w" });
+  } catch {
+    sink = null;
+  }
+
   const consumeLine = (line: string) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
@@ -208,7 +225,9 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
     } catch {
       return;
     }
-    if (KEEP_EVENT_TYPES.has(event.type)) events.push(event);
+    if (!KEEP_EVENT_TYPES.has(event.type)) return;
+    events.push(event);
+    sink?.write(trimmed + "\n");
   };
 
   const result = await run(options.piBin, args, {
@@ -228,12 +247,7 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
     hintBuffer += result.stderr.slice(0, HINT_BUFFER_LIMIT);
   }
 
-  // Persist the filtered stream for debugging; orders of magnitude smaller.
-  try {
-    writeFileSync(options.rawPath, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
-  } catch {
-    /* diagnostics only */
-  }
+  sink?.end();
 
   return {
     code: result.code,
