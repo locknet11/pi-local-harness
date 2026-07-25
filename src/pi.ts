@@ -240,20 +240,35 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
     sink = null;
   }
 
+  const addHintText = (text: string) => {
+    if (hintBuffer.length < HINT_BUFFER_LIMIT) hintBuffer += text.slice(0, 4096) + "\n";
+  };
+
   const consumeLine = (line: string) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
-    if (hintBuffer.length < HINT_BUFFER_LIMIT) {
-      hintBuffer += trimmed.slice(0, 4096) + "\n";
+
+    let event: PiEvent | null = null;
+    if (trimmed.startsWith("{")) {
+      try {
+        event = JSON.parse(trimmed) as PiEvent;
+      } catch {
+        event = null;
+      }
     }
-    if (!trimmed.startsWith("{")) return;
-    let event: PiEvent;
-    try {
-      event = JSON.parse(trimmed) as PiEvent;
-    } catch {
-      return;
+
+    // Scan only what the machinery said, never what the model wrote. A brief
+    // asking for "rate limiting" produced an AGENTS.md full of the phrase, and
+    // the scanner reported the backend as rate limited on a run that succeeded.
+    if (event === null) {
+      addHintText(trimmed); // not an event at all: a crash, a stack trace
+    } else if (event.type === "error") {
+      addHintText(trimmed);
+    } else if (event.message?.stopReason === "error" && event.message.errorMessage) {
+      addHintText(event.message.errorMessage);
     }
-    if (!KEEP_EVENT_TYPES.has(event.type)) return;
+
+    if (event === null || !KEEP_EVENT_TYPES.has(event.type)) return;
     events.push(event);
     sink?.write(trimmed + "\n");
   };

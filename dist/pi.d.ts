@@ -13,6 +13,8 @@ export interface PiEvent {
             output?: number;
             totalTokens?: number;
         };
+        stopReason?: string;
+        errorMessage?: string;
     };
     messages?: Array<{
         role?: string;
@@ -33,6 +35,8 @@ export interface PiRunResult {
     totalTokens: number;
     /** Final assistant text, for diagnostics. */
     finalText: string;
+    /** The backend's own error, when a turn ended with stopReason "error". */
+    backendError: string;
     events: PiEvent[];
     rawPath: string;
     /** Provider-side problems worth surfacing (context overflow, refused connection…). */
@@ -52,11 +56,19 @@ export interface PiOptions {
     rawPath: string;
 }
 export declare function parseEvents(jsonl: string): PiEvent[];
+/**
+ * pi reports a failed request inside the event stream, not through its exit
+ * code: the turn ends with `stopReason: "error"` and an `errorMessage`, and pi
+ * still exits 0. The message body is usually `<status>: <provider JSON>`, whose
+ * only readable part is the inner `message` field.
+ */
+export declare function readableBackendError(raw: string): string;
 export declare function analyzeEvents(events: PiEvent[]): {
     writeCalls: number;
     toolErrors: number;
     totalTokens: number;
     finalText: string;
+    backendError: string;
 };
 /**
  * Backend problems worth surfacing.

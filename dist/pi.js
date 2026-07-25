@@ -40,12 +40,37 @@ export function parseEvents(jsonl) {
     }
     return events;
 }
+/**
+ * pi reports a failed request inside the event stream, not through its exit
+ * code: the turn ends with `stopReason: "error"` and an `errorMessage`, and pi
+ * still exits 0. The message body is usually `<status>: <provider JSON>`, whose
+ * only readable part is the inner `message` field.
+ */
+export function readableBackendError(raw) {
+    const match = /^(\d{3}):\s*(\{[\s\S]*\})\s*$/.exec(raw.trim());
+    if (!match?.[2])
+        return raw.trim();
+    try {
+        const body = JSON.parse(match[2]);
+        const inner = body.error?.message ?? body.message;
+        if (typeof inner === "string" && inner !== "")
+            return `${match[1]}: ${inner}`;
+    }
+    catch {
+        /* not JSON after all — fall through */
+    }
+    return raw.trim();
+}
 export function analyzeEvents(events) {
     let writeCalls = 0;
     let toolErrors = 0;
     let totalTokens = 0;
     let finalText = "";
+    let backendError = "";
     for (const e of events) {
+        if (e.message?.stopReason === "error" && typeof e.message.errorMessage === "string") {
+            backendError = readableBackendError(e.message.errorMessage);
+        }
         if (e.type === "tool_execution_end") {
             if (e.isError === true)
                 toolErrors += 1;
@@ -62,7 +87,7 @@ export function analyzeEvents(events) {
                 finalText = text.join("\n");
         }
     }
-    return { writeCalls, toolErrors, totalTokens, finalText };
+    return { writeCalls, toolErrors, totalTokens, finalText, backendError };
 }
 const HINT_PATTERNS = [
     [
@@ -160,23 +185,36 @@ export async function runPi(prompt, options) {
     catch {
         sink = null;
     }
+    const addHintText = (text) => {
+        if (hintBuffer.length < HINT_BUFFER_LIMIT)
+            hintBuffer += text.slice(0, 4096) + "\n";
+    };
     const consumeLine = (line) => {
         const trimmed = line.trim();
         if (trimmed === "")
             return;
-        if (hintBuffer.length < HINT_BUFFER_LIMIT) {
-            hintBuffer += trimmed.slice(0, 4096) + "\n";
+        let event = null;
+        if (trimmed.startsWith("{")) {
+            try {
+                event = JSON.parse(trimmed);
+            }
+            catch {
+                event = null;
+            }
         }
-        if (!trimmed.startsWith("{"))
-            return;
-        let event;
-        try {
-            event = JSON.parse(trimmed);
+        // Scan only what the machinery said, never what the model wrote. A brief
+        // asking for "rate limiting" produced an AGENTS.md full of the phrase, and
+        // the scanner reported the backend as rate limited on a run that succeeded.
+        if (event === null) {
+            addHintText(trimmed); // not an event at all: a crash, a stack trace
         }
-        catch {
-            return;
+        else if (event.type === "error") {
+            addHintText(trimmed);
         }
-        if (!KEEP_EVENT_TYPES.has(event.type))
+        else if (event.message?.stopReason === "error" && event.message.errorMessage) {
+            addHintText(event.message.errorMessage);
+        }
+        if (event === null || !KEEP_EVENT_TYPES.has(event.type))
             return;
         events.push(event);
         sink?.write(trimmed + "\n");
@@ -198,14 +236,18 @@ export async function runPi(prompt, options) {
         hintBuffer += result.stderr.slice(0, HINT_BUFFER_LIMIT);
     }
     sink?.end();
+    const analysis = analyzeEvents(events);
     return {
         code: result.code,
         timedOut: result.timedOut,
         aborted: result.aborted,
-        ...analyzeEvents(events),
+        ...analysis,
         events,
         rawPath: options.rawPath,
-        hints: extractHints(hintBuffer),
+        // The guessed hints are keyword matches over raw output and do misfire; when
+        // the backend told us exactly what went wrong, that is the only thing worth
+        // printing.
+        hints: analysis.backendError === "" ? extractHints(hintBuffer) : [],
     };
 }
 /**

@@ -13,8 +13,8 @@
  *   3. scaffold  — skeleton plus a test runner plus one passing test; without
  *                  this the first feature has nothing to verify against
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import * as git from "./git.js";
 import { runPi } from "./pi.js";
@@ -143,9 +143,51 @@ async function callPi(ctx, tag, prompt, attachments) {
         rawPath: join(ctx.tempDir, `pi.${tag}.jsonl`),
     });
     log.detail(`tools: ${result.writeCalls} writes, ${result.toolErrors} errors · ~${result.totalTokens} tokens · exit ${result.code}`);
+    // pi exits 0 even when every request failed, so the error in the event stream
+    // is the only thing that explains an empty run.
+    if (result.backendError)
+        log.error(`backend refused the request — ${result.backendError}`);
     for (const hint of result.hints)
         log.warn(`backend: ${hint}`);
     return result;
+}
+/**
+ * Recover a document the model wrote to the wrong directory.
+ *
+ * The brief is attached from the state dir, so a model asked for "AGENTS.md"
+ * reasonably writes it next to the brief — a complete, correct document that
+ * the harness then declares missing and regenerates from scratch. The prompt
+ * names the exact path now; this catches the times that is not enough.
+ */
+export function rescueMisplacedFile(ctx, relativePath) {
+    const target = join(ctx.cwd, relativePath);
+    if (existsSync(target))
+        return false;
+    const stateDir = join(ctx.cwd, ctx.config.stateDir);
+    if (!existsSync(stateDir))
+        return false;
+    const wanted = basename(relativePath);
+    for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
+        if (!entry.isFile() || entry.name !== wanted)
+            continue;
+        const stray = join(stateDir, entry.name);
+        if (readFileSync(stray, "utf8").trim() === "")
+            continue;
+        mkdirSync(dirname(target), { recursive: true });
+        renameSync(stray, target);
+        log.warn(`${wanted} was written to ${ctx.config.stateDir}/ — moved it to ${relativePath}.`);
+        return true;
+    }
+    return false;
+}
+/**
+ * Every attempt uses the same model against the same backend, so a refused
+ * request refuses identically three times. Stop and say what to change.
+ */
+function backendUnusable(ctx) {
+    log.error(`${ctx.config.model} is not usable on this backend — stopping instead of retrying.`);
+    log.detail("Pick a model that is loaded and fits in memory: pi-harness models, then --model <id>.");
+    return false;
 }
 export async function generateAgentsFile(ctx) {
     const agentsPath = join(ctx.cwd, ctx.config.agentsFile);
@@ -153,16 +195,19 @@ export async function generateAgentsFile(ctx) {
         if (stopFlag.isStopped)
             return false;
         log.step(`Writing ${ctx.config.agentsFile} (attempt ${attempt}/${ctx.config.bootstrapRetries})`);
-        let prompt = agentsPrompt(ctx.config.agentsFile);
+        let prompt = agentsPrompt(ctx.config.agentsFile, ctx.config.stateDir);
         if (attempt > 1)
             prompt += missingFileNudge(ctx.config.agentsFile);
         const result = await callPi(ctx, `agents-${attempt}`, prompt, [ctx.config.briefFile]);
         if (result.aborted)
             return false;
+        if (result.backendError)
+            return backendUnusable(ctx);
         if (result.timedOut) {
             log.warn("Timed out while writing the architecture doc.");
             continue;
         }
+        rescueMisplacedFile(ctx, ctx.config.agentsFile);
         if (existsSync(agentsPath) && readFileSync(agentsPath, "utf8").trim() !== "") {
             const lines = readFileSync(agentsPath, "utf8").split("\n").length;
             log.ok(`${ctx.config.agentsFile} written (${lines} lines).`);
@@ -180,7 +225,7 @@ export async function generateSpecFile(ctx) {
         if (stopFlag.isStopped)
             return false;
         log.step(`Writing ${ctx.config.specFile} (attempt ${attempt}/${ctx.config.bootstrapRetries})`);
-        let prompt = specPrompt(ctx.config.specFile, ctx.config.featureTarget);
+        let prompt = specPrompt(ctx.config.specFile, ctx.config.featureTarget, ctx.config.stateDir);
         if (errors.length > 0)
             prompt += specRetryPrompt(ctx.config.specFile, errors);
         const result = await callPi(ctx, `spec-${attempt}`, prompt, [
@@ -189,6 +234,9 @@ export async function generateSpecFile(ctx) {
         ]);
         if (result.aborted)
             return false;
+        if (result.backendError)
+            return backendUnusable(ctx);
+        rescueMisplacedFile(ctx, ctx.config.specFile);
         if (!existsSync(specPath)) {
             log.warn(`${ctx.config.specFile} did not appear.`);
             errors = [`You did not create ${ctx.config.specFile}. Create it with the write tool.`];

@@ -113,7 +113,14 @@ async function resolveProvider(options, config) {
     log.detail(`auto-detected backend: ${detected.displayName}`);
     return detected;
 }
-/** Pick a model when none was configured: the largest available is the best guess. */
+/**
+ * Pick a model when none was configured.
+ *
+ * A model that is already loaded wins over a bigger one sitting on disk. Size
+ * alone picks models that cannot run: LM Studio refuses to load a 26B model on
+ * a laptop that is already holding a 9B one, and the refusal arrives as a 400
+ * on the first inference — after the interview, minutes into the run.
+ */
 async function resolveModel(provider, config) {
     if (config.model)
         return config.model;
@@ -121,10 +128,20 @@ async function resolveModel(provider, config) {
     if (models.length === 0) {
         throw new Error(`${provider.displayName} has no models. Download one first.`);
     }
+    const loaded = await provider.listLoaded().catch(() => []);
+    const usable = models.filter((m) => loaded.some((l) => l.id === m.id));
+    if (usable.length > 0) {
+        const best = [...usable].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0))[0];
+        if (best) {
+            log.warn(`No model configured; using the one already loaded: ${best.id}`);
+            return best.id;
+        }
+    }
     const best = [...models].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0))[0];
     if (!best)
         throw new Error("No usable model found.");
-    log.warn(`No model configured; using the largest available: ${best.id}`);
+    log.warn(`No model configured and none loaded; using the largest available: ${best.id}`);
+    log.detail(`If it does not fit in memory, pick a smaller one with --model.`);
     return best.id;
 }
 function makeTempDir(cwd, config) {
@@ -404,6 +421,14 @@ async function main() {
             else if (options.idea) {
                 writeBrief(ctx, briefFromIdea(options.idea, config.featureTarget));
                 log.ok(`Brief written to ${config.briefFile}`);
+            }
+            else if (existsSync(join(cwd, config.briefFile)) &&
+                readFileSync(join(cwd, config.briefFile), "utf8").trim() !== "") {
+                // The interview is the one step only the human can do. When init fails
+                // later — a model that will not write AGENTS.md, an unusable backend —
+                // re-running it must not mean answering every question again.
+                log.ok(`Reusing the brief in ${config.briefFile}`);
+                log.detail(`To start over: delete it, or pass --idea "..." / --brief <file>.`);
             }
             else {
                 if (!process.stdin.isTTY) {

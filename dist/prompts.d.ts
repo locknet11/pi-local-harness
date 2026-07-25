@@ -9,8 +9,8 @@
  *   2. On a retry, say what went wrong. Re-sending an identical prompt gets an
  *      identical failure; naming the mistake is what breaks the loop.
  */
-export declare function agentsPrompt(agentsFile: string): string;
-export declare function specPrompt(specFile: string, featureTarget: number): string;
+export declare function agentsPrompt(agentsFile: string, stateDir: string): string;
+export declare function specPrompt(specFile: string, featureTarget: number, stateDir: string): string;
 export declare function specRetryPrompt(specFile: string, errors: string[]): string;
 export declare function scaffoldPrompt(agentsFile: string, testCmdFile: string): string;
 export declare function featurePrompt(opts: {

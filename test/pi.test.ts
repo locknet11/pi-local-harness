@@ -182,6 +182,61 @@ emit({ type: "agent_settled" });
     expect(result.backendError).toBe("429: failed: rate limit reached");
     expect(result.hints).toEqual([]);
   });
+
+  it("does not mistake the document the model wrote for a backend problem", async () => {
+    // From a real run: the brief asked for "rate limiting by IP", so the
+    // AGENTS.md the model produced was full of the phrase, and the same file's
+    // "Error handling" heading made it look error-ish. The harness warned
+    // "rate limited by the backend" on a call that wrote the file and succeeded.
+    const { runPi } = await import("../src/pi.js");
+    const fake = join(dir, "fake-pi-content.cjs");
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node
+const emit = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+const doc = "## Conventions\\n- Error handling: return errors\\n- Rate limiting by IP + User-Agent\\n";
+emit({ type: "agent_start" });
+emit({ type: "tool_execution_end", toolName: "write", isError: false });
+emit({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: doc }] }] });
+`,
+    );
+    chmodSync(fake, 0o755);
+    const result = await runPi("go", {
+      piBin: fake,
+      provider: "fake",
+      model: "fake",
+      cwd: dir,
+      timeoutSeconds: 60,
+      rawPath: join(dir, "content.jsonl"),
+    });
+
+    expect(result.writeCalls).toBe(1);
+    expect(result.hints).toEqual([]);
+  });
+
+  it("still reports a crash that is not an event at all", async () => {
+    const { runPi } = await import("../src/pi.js");
+    const fake = join(dir, "fake-pi-crash.cjs");
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
+process.stderr.write("Error: connect ECONNREFUSED 127.0.0.1:1234\\n");
+process.exit(1);
+`,
+    );
+    chmodSync(fake, 0o755);
+    const result = await runPi("go", {
+      piBin: fake,
+      provider: "fake",
+      model: "fake",
+      cwd: dir,
+      timeoutSeconds: 60,
+      rawPath: join(dir, "crash.jsonl"),
+    });
+
+    expect(result.hints.join()).toMatch(/not reachable/);
+  });
 });
 
 describe("backend hints", () => {

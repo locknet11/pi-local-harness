@@ -487,6 +487,15 @@ async function main(): Promise<number> {
       } else if (options.idea) {
         writeBrief(ctx, briefFromIdea(options.idea, config.featureTarget));
         log.ok(`Brief written to ${config.briefFile}`);
+      } else if (
+        existsSync(join(cwd, config.briefFile)) &&
+        readFileSync(join(cwd, config.briefFile), "utf8").trim() !== ""
+      ) {
+        // The interview is the one step only the human can do. When init fails
+        // later — a model that will not write AGENTS.md, an unusable backend —
+        // re-running it must not mean answering every question again.
+        log.ok(`Reusing the brief in ${config.briefFile}`);
+        log.detail(`To start over: delete it, or pass --idea "..." / --brief <file>.`);
       } else {
         if (!process.stdin.isTTY) {
           log.error("No TTY for the interview. Use --idea \"...\" or --brief <file>.");

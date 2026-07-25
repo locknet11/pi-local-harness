@@ -54,6 +54,8 @@ export async function processFeature(ctx, feature, checkpoint) {
             rawPath: join(ctx.tempDir, `pi.f${feature.index}-r${attempt}.jsonl`),
         });
         log.detail(`tools: ${result.writeCalls} writes, ${result.toolErrors} errors · ~${result.totalTokens} tokens · exit ${result.code}`);
+        if (result.backendError)
+            log.error(`backend refused the request — ${result.backendError}`);
         for (const hint of result.hints)
             log.warn(`backend: ${hint}`);
         if (result.aborted || stopFlag.isStopped)
