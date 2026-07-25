@@ -52,6 +52,7 @@ export async function processFeature(ctx, feature, checkpoint) {
             saveSession: config.saveSessions,
             sessionName: `harness-f${feature.index}-r${attempt}`,
             rawPath: join(ctx.tempDir, `pi.f${feature.index}-r${attempt}.jsonl`),
+            watch: config.watch,
         });
         log.detail(`tools: ${result.writeCalls} writes, ${result.toolErrors} errors · ~${result.totalTokens} tokens · exit ${result.code}`);
         if (result.backendError)

@@ -39,6 +39,8 @@ export interface HarnessConfig {
   unloadBetweenFeatures: boolean;
   saveSessions: boolean;
   keepTemp: boolean;
+  /** Stream the model's reasoning and replies to the terminal while it works. */
+  watch: boolean;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -74,6 +76,7 @@ const DEFAULTS: HarnessConfig = {
   unloadBetweenFeatures: false,
   saveSessions: false,
   keepTemp: false,
+  watch: false,
 };
 
 export const CONFIG_FILENAME = "harness.config.json";
@@ -129,6 +132,7 @@ export function loadConfig(projectDir: string, overrides: Partial<HarnessConfig>
     ...(env["SAVE_SESSIONS"] !== undefined
       ? { saveSessions: bool(env["SAVE_SESSIONS"], DEFAULTS.saveSessions) }
       : {}),
+    ...(env["HARNESS_WATCH"] !== undefined ? { watch: bool(env["HARNESS_WATCH"], DEFAULTS.watch) } : {}),
   };
 
   const merged: HarnessConfig = { ...DEFAULTS, ...fileConfig, ...envConfig, ...overrides };

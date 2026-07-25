@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run } from "./proc.js";
+import { color } from "./ui.js";
 
 /** pi tool names that actually modify the repository. */
 const WRITE_TOOLS = new Set([
@@ -38,9 +39,10 @@ export interface PiEvent {
   type: string;
   toolName?: string;
   isError?: boolean;
+  args?: Record<string, unknown>;
   message?: {
     role?: string;
-    content?: Array<{ type?: string; text?: string }>;
+    content?: Array<{ type?: string; text?: string; thinking?: string }>;
     usage?: { input?: number; output?: number; totalTokens?: number };
     stopReason?: string;
     errorMessage?: string;
@@ -79,6 +81,62 @@ export interface PiOptions {
   saveSession?: boolean;
   sessionName?: string;
   rawPath: string;
+  /** Stream the model's reasoning, replies and tool calls to the terminal. */
+  watch?: boolean;
+}
+
+/**
+ * Live view of a turn.
+ *
+ * pi re-sends the WHOLE message on every `message_update`, so printing an
+ * update verbatim reprints everything written so far. Each content part is
+ * tracked by index and only the new tail is emitted, which turns the stream
+ * back into something that reads like typing.
+ */
+export function createWatcher(write: (s: string) => void = (s) => process.stdout.write(s)) {
+  const shown = new Map<number, number>();
+  let lastKind = "";
+
+  const emit = (kind: string, index: number, full: string) => {
+    const already = shown.get(index) ?? 0;
+    if (full.length <= already) return;
+    const delta = full.slice(already);
+    shown.set(index, full.length);
+    if (kind !== lastKind) {
+      write(`\n${color.dim(kind === "thinking" ? "· thinking " : "· model ")}\n`);
+      lastKind = kind;
+    }
+    write(kind === "thinking" ? color.dim(delta) : delta);
+  };
+
+  return (event: PiEvent): void => {
+    if (event.type === "message_update") {
+      const parts = event.message?.content ?? [];
+      parts.forEach((part, index) => {
+        if (part.type === "thinking" && typeof part.thinking === "string") {
+          emit("thinking", index, part.thinking);
+        } else if (part.type === "text" && typeof part.text === "string") {
+          emit("text", index, part.text);
+        }
+      });
+      return;
+    }
+    if (event.type === "tool_execution_start") {
+      // The arguments can be a whole file; one line of it is enough to follow along.
+      const detail = Object.entries(event.args ?? {})
+        .map(([k, v]) => `${k}=${String(v).replace(/\s+/g, " ").slice(0, 60)}`)
+        .join(" ");
+      write(`\n${color.cyan(`▸ ${event.toolName ?? "tool"}`)} ${color.dim(detail)}\n`);
+      lastKind = "";
+      return;
+    }
+    if (event.type === "tool_execution_end") {
+      write(event.isError === true ? color.red("  ✖ tool failed\n") : color.dim("  ✔\n"));
+      lastKind = "";
+      return;
+    }
+    if (event.type === "agent_settled") write("\n");
+  };
 }
 
 export function parseEvents(jsonl: string): PiEvent[] {
@@ -244,6 +302,8 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
     if (hintBuffer.length < HINT_BUFFER_LIMIT) hintBuffer += text.slice(0, 4096) + "\n";
   };
 
+  const watch = options.watch === true ? createWatcher() : null;
+
   const consumeLine = (line: string) => {
     const trimmed = line.trim();
     if (trimmed === "") return;
@@ -256,6 +316,10 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
         event = null;
       }
     }
+
+    // Before the KEEP filter: the live view is driven by the token-level
+    // updates the harness deliberately does not store.
+    if (watch && event !== null) watch(event);
 
     // Scan only what the machinery said, never what the model wrote. A brief
     // asking for "rate limiting" produced an AGENTS.md full of the phrase, and

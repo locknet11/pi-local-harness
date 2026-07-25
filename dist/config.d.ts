@@ -29,6 +29,8 @@ export interface HarnessConfig {
     unloadBetweenFeatures: boolean;
     saveSessions: boolean;
     keepTemp: boolean;
+    /** Stream the model's reasoning and replies to the terminal while it works. */
+    watch: boolean;
 }
 export declare const CONFIG_FILENAME = "harness.config.json";
 export declare function loadConfig(projectDir: string, overrides?: Partial<HarnessConfig>): HarnessConfig;

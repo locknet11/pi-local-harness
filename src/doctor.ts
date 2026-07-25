@@ -6,13 +6,13 @@
  * command that does not exist, a corrupt models.json.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HarnessConfig } from "./config.js";
 import * as git from "./git.js";
 import { piSeesModel, probeToolCalling } from "./pi.js";
 import { commandExecutable, run } from "./proc.js";
 import { formatBytes, type Provider } from "./providers/index.js";
+import { piModelsJsonPath } from "./providers/piconfig.js";
 import { validateSpec } from "./spec.js";
 import { color } from "./ui.js";
 import { declaredTestCommand, resolveTestCommand } from "./verify.js";
@@ -32,8 +32,8 @@ export interface DoctorReport {
   fail: number;
 }
 
-export const piModelsJsonPath = (): string =>
-  join(homedir(), ".pi", "agent", "models.json");
+export { piModelsJsonPath } from "./providers/piconfig.js";
+export { readPiProviders } from "./providers/piconfig.js";
 
 export async function diagnose(
   cwd: string,

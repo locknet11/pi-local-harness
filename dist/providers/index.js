@@ -1,17 +1,26 @@
 /** Provider registry and auto-detection. */
 import { LMStudioProvider } from "./lmstudio.js";
 import { OllamaProvider } from "./ollama.js";
+import { findPiProvider, PiRegisteredProvider, readPiProviders } from "./piconfig.js";
 export * from "./types.js";
 export { OllamaProvider } from "./ollama.js";
 export { LMStudioProvider, findLmsBinary } from "./lmstudio.js";
+export { findPiProvider, piModelsJsonPath, PiRegisteredProvider, readPiProviders, } from "./piconfig.js";
 export function createProvider(name) {
     switch (name) {
         case "ollama":
             return new OllamaProvider();
         case "lmstudio":
             return new LMStudioProvider();
-        default:
-            throw new Error(`Unknown provider "${name}". Supported: ollama, lmstudio.`);
+        default: {
+            // Anything else may still be a backend the user wired into pi itself.
+            const fromPi = findPiProvider(name);
+            if (fromPi)
+                return new PiRegisteredProvider(fromPi);
+            const known = readPiProviders().map((p) => p.name);
+            throw new Error(`Unknown provider "${name}". Built in: ollama, lmstudio.` +
+                (known.length > 0 ? ` Configured in pi: ${known.join(", ")}.` : ""));
+        }
     }
 }
 export function allProviders() {

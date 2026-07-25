@@ -2,7 +2,13 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { analyzeEvents, extractHints, parseEvents, registerModel } from "../src/pi.js";
+import {
+  analyzeEvents,
+  createWatcher,
+  extractHints,
+  parseEvents,
+  registerModel,
+} from "../src/pi.js";
 
 let dir: string;
 beforeEach(() => {
@@ -364,5 +370,104 @@ describe("registering a model with pi", () => {
       }),
     ).toThrow(/not valid JSON/);
     expect(readFileSync(path, "utf8")).toBe("{ this is not json");
+  });
+});
+
+describe("watching a turn live", () => {
+  const capture = () => {
+    let out = "";
+    return { watch: createWatcher((s) => (out += s)), read: () => out };
+  };
+
+  // pi re-sends the entire message on every update. Printing them verbatim
+  // reprints the whole answer per token, which is unreadable.
+  it("prints only what is new in each update", () => {
+    const { watch, read } = capture();
+    watch({ type: "message_update", message: { content: [{ type: "text", text: "Hel" }] } });
+    watch({ type: "message_update", message: { content: [{ type: "text", text: "Hello" }] } });
+    watch({ type: "message_update", message: { content: [{ type: "text", text: "Hello there" }] } });
+
+    expect(read()).toContain("Hello there");
+    expect(read().match(/Hello/g)).toHaveLength(1);
+  });
+
+  it("labels reasoning separately from the reply", () => {
+    const { watch, read } = capture();
+    watch({
+      type: "message_update",
+      message: { content: [{ type: "thinking", thinking: "let me count" }] },
+    });
+    watch({
+      type: "message_update",
+      message: {
+        content: [
+          { type: "thinking", thinking: "let me count" },
+          { type: "text", text: "4" },
+        ],
+      },
+    });
+
+    const out = read();
+    expect(out).toContain("thinking");
+    expect(out).toContain("let me count");
+    expect(out.indexOf("· model")).toBeGreaterThan(out.indexOf("let me count"));
+    expect(out).toContain("4");
+  });
+
+  it("shows tool calls and whether they failed", () => {
+    const { watch, read } = capture();
+    watch({ type: "tool_execution_start", toolName: "write", args: { path: "AGENTS.md" } });
+    watch({ type: "tool_execution_end", toolName: "write", isError: false });
+    watch({ type: "tool_execution_start", toolName: "bash", args: { cmd: "go test ./..." } });
+    watch({ type: "tool_execution_end", toolName: "bash", isError: true });
+
+    const out = read();
+    expect(out).toContain("write");
+    expect(out).toContain("path=AGENTS.md");
+    expect(out).toContain("go test ./...");
+    expect(out).toContain("tool failed");
+  });
+
+  it("truncates an argument that is a whole file", () => {
+    const { watch, read } = capture();
+    watch({
+      type: "tool_execution_start",
+      toolName: "write",
+      args: { path: "a.md", content: "x".repeat(5000) },
+    });
+    expect(read().length).toBeLessThan(400);
+  });
+
+  it("stays silent unless asked for", async () => {
+    const { runPi } = await import("../src/pi.js");
+    const fake = join(dir, "fake-pi-quiet.cjs");
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node
+const emit = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+emit({ type: "message_update", message: { content: [{ type: "text", text: "chatter" }] } });
+emit({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] });
+`,
+    );
+    chmodSync(fake, 0o755);
+    const written: string[] = [];
+    const original = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((s: string) => {
+      written.push(String(s));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      await runPi("go", {
+        piBin: fake,
+        provider: "fake",
+        model: "fake",
+        cwd: dir,
+        timeoutSeconds: 60,
+        rawPath: join(dir, "quiet.jsonl"),
+      });
+    } finally {
+      process.stdout.write = original;
+    }
+    expect(written.join("")).not.toContain("chatter");
   });
 });

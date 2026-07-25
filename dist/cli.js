@@ -7,13 +7,13 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { briefFromIdea, generateAgentsFile, generateSpecFile, interview, scaffold, writeBrief, } from "./bootstrap.js";
 import { CONFIG_FILENAME, exampleConfig, loadConfig } from "./config.js";
-import { diagnose, piModelsJsonPath, renderReport } from "./doctor.js";
+import { diagnose, renderReport } from "./doctor.js";
 import * as git from "./git.js";
 import { isAlive, Lock, readPidFile, writePidFile } from "./lock.js";
 import { runLoop } from "./loop.js";
 import { piSeesModel, probeToolCalling, registerModel } from "./pi.js";
 import { installSignalHandlers, killAllChildren, stopFlag } from "./proc.js";
-import { createProvider, detectProvider, formatBytes, } from "./providers/index.js";
+import { createProvider, detectProvider, formatBytes, piModelsJsonPath, readPiProviders, } from "./providers/index.js";
 import { readSpec, resetFrom, resetStale, statusMark, summarize, validateSpec, } from "./spec.js";
 import { color, configureLogging, log } from "./ui.js";
 const USAGE = `pi-harness — build whole projects from scratch with pi + a local LLM
@@ -37,8 +37,10 @@ Commands:
   init-config          Write a ${CONFIG_FILENAME} template
 
 Options:
-  --provider <name>    ollama | lmstudio (auto-detected when omitted)
+  --provider <name>    ollama | lmstudio, or any provider configured in pi
   --model <id>         Model id as the backend names it
+  --watch              Stream the model's reasoning, replies and tool calls
+  --pi                 With models: list what pi's global config already has
   --context <n>        Required context window (default 32768)
   --idea "<text>"      Skip the interview with a one-line description
   --brief <file>       Skip the interview using a brief file
@@ -71,6 +73,8 @@ function parseCli(argv) {
             yes: { type: "boolean", short: "y", default: false },
             probe: { type: "boolean", default: false },
             json: { type: "boolean", default: false },
+            watch: { type: "boolean", default: false },
+            pi: { type: "boolean", default: false },
             help: { type: "boolean", short: "h", default: false },
         },
     });
@@ -99,6 +103,8 @@ function parseCli(argv) {
             yes: values["yes"] === true,
             probe: values["probe"] === true,
             json: values["json"] === true,
+            watch: values["watch"] === true,
+            pi: values["pi"] === true,
         },
     };
 }
@@ -127,6 +133,13 @@ async function resolveModel(provider, config) {
     const models = await provider.listModels();
     if (models.length === 0) {
         throw new Error(`${provider.displayName} has no models. Download one first.`);
+    }
+    // A backend configured in pi has no notion of "loaded", but pi does record
+    // which model it defaults to — a far better guess than the first in the list.
+    const preferred = provider.defaultModel?.();
+    if (preferred && models.some((m) => m.id === preferred)) {
+        log.warn(`No model configured; using pi's default for ${provider.name}: ${preferred}`);
+        return preferred;
     }
     const loaded = await provider.listLoaded().catch(() => []);
     const usable = models.filter((m) => loaded.some((l) => l.id === m.id));
@@ -158,6 +171,7 @@ async function main() {
         ...(options.context !== undefined ? { contextLength: options.context } : {}),
         ...(options.features !== undefined ? { featureTarget: options.features } : {}),
         ...(options.spec ? { specFile: options.spec } : {}),
+        ...(options.watch ? { watch: true } : {}),
     };
     const config = loadConfig(cwd, overrides);
     // Lightweight commands: no lock, no logging setup.
@@ -245,6 +259,37 @@ async function main() {
                 count = resetFrom(specPath, from);
             }
             process.stdout.write(`♻ ${count} feature(s) returned to PENDING.\n`);
+            return 0;
+        }
+        case "models": {
+            // Reading pi's config needs no backend, so it must not go through
+            // detection — the whole point is to see backends that are elsewhere.
+            if (!options.pi)
+                break;
+            const providers = readPiProviders();
+            if (options.json) {
+                process.stdout.write(JSON.stringify(providers, null, 2) + "\n");
+                return 0;
+            }
+            if (providers.length === 0) {
+                process.stdout.write(`Nothing configured in ${piModelsJsonPath()}.\n`);
+                process.stdout.write(`Register the current model with: pi-harness setup-model\n`);
+                return 1;
+            }
+            process.stdout.write(`\n${color.cyan(`Configured in pi — ${piModelsJsonPath()}`)}\n`);
+            for (const p of providers) {
+                process.stdout.write(`\n  ${color.bold(p.name)} ${color.dim(p.baseUrl)}\n`);
+                for (const m of p.models) {
+                    const isDefault = p.defaultModelId === m.id;
+                    const bits = [
+                        m.contextWindow ? `ctx=${m.contextWindow}` : "",
+                        m.reasoning === true ? "reasoning" : "",
+                    ].filter(Boolean);
+                    process.stdout.write(`    ${isDefault ? color.green("★") : " "} ${m.id.padEnd(38)} ${color.dim(bits.join("  "))}\n`);
+                }
+            }
+            process.stdout.write(`\n  ${color.dim("★ = pi's default")}\n`);
+            process.stdout.write(`  ${color.dim("Use one with: pi-harness run --provider <name> --model <id>")}\n\n`);
             return 0;
         }
     }

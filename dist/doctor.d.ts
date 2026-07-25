@@ -15,7 +15,8 @@ export interface DoctorReport {
     warn: number;
     fail: number;
 }
-export declare const piModelsJsonPath: () => string;
+export { piModelsJsonPath } from "./providers/piconfig.js";
+export { readPiProviders } from "./providers/piconfig.js";
 export declare function diagnose(cwd: string, config: HarnessConfig, provider: Provider, options?: {
     probe?: boolean;
 }): Promise<DoctorReport>;

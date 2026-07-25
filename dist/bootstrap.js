@@ -141,6 +141,7 @@ async function callPi(ctx, tag, prompt, attachments) {
         saveSession: ctx.config.saveSessions,
         sessionName: `harness-${tag}`,
         rawPath: join(ctx.tempDir, `pi.${tag}.jsonl`),
+        watch: ctx.config.watch,
     });
     log.detail(`tools: ${result.writeCalls} writes, ${result.toolErrors} errors · ~${result.totalTokens} tokens · exit ${result.code}`);
     // pi exits 0 even when every request failed, so the error in the event stream
@@ -182,11 +183,18 @@ export function rescueMisplacedFile(ctx, relativePath) {
 }
 /**
  * Every attempt uses the same model against the same backend, so a refused
- * request refuses identically three times. Stop and say what to change.
+ * request refuses identically three times. Stop and say what to change —
+ * which is a different thing depending on what the backend refused.
  */
-function backendUnusable(ctx) {
-    log.error(`${ctx.config.model} is not usable on this backend — stopping instead of retrying.`);
-    log.detail("Pick a model that is loaded and fits in memory: pi-harness models, then --model <id>.");
+function backendUnusable(ctx, backendError) {
+    log.error(`The backend refused every attempt with ${ctx.config.model} — stopping.`);
+    if (/context/i.test(backendError)) {
+        log.detail(`The prompt did not fit. Serve a bigger window: pi-harness tune-ctx --context ${ctx.config.contextLength * 2}`);
+        log.detail("A backend serving several requests at once splits its context between them, so a window that worked alone can overflow.");
+    }
+    else {
+        log.detail("Pick a model that is loaded and fits in memory: pi-harness models, then --model <id>.");
+    }
     return false;
 }
 export async function generateAgentsFile(ctx) {
@@ -202,7 +210,7 @@ export async function generateAgentsFile(ctx) {
         if (result.aborted)
             return false;
         if (result.backendError)
-            return backendUnusable(ctx);
+            return backendUnusable(ctx, result.backendError);
         if (result.timedOut) {
             log.warn("Timed out while writing the architecture doc.");
             continue;
@@ -235,7 +243,7 @@ export async function generateSpecFile(ctx) {
         if (result.aborted)
             return false;
         if (result.backendError)
-            return backendUnusable(ctx);
+            return backendUnusable(ctx, result.backendError);
         rescueMisplacedFile(ctx, ctx.config.specFile);
         if (!existsSync(specPath)) {
             log.warn(`${ctx.config.specFile} did not appear.`);

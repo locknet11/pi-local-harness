@@ -91,6 +91,7 @@ export async function processFeature(
       saveSession: config.saveSessions,
       sessionName: `harness-f${feature.index}-r${attempt}`,
       rawPath: join(ctx.tempDir, `pi.f${feature.index}-r${attempt}.jsonl`),
+      watch: config.watch,
     });
 
     log.detail(

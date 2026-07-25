@@ -182,6 +182,7 @@ async function callPi(
     saveSession: ctx.config.saveSessions,
     sessionName: `harness-${tag}`,
     rawPath: join(ctx.tempDir, `pi.${tag}.jsonl`),
+    watch: ctx.config.watch,
   });
   log.detail(
     `tools: ${result.writeCalls} writes, ${result.toolErrors} errors · ~${result.totalTokens} tokens · exit ${result.code}`,
@@ -223,11 +224,21 @@ export function rescueMisplacedFile(ctx: BootstrapContext, relativePath: string)
 
 /**
  * Every attempt uses the same model against the same backend, so a refused
- * request refuses identically three times. Stop and say what to change.
+ * request refuses identically three times. Stop and say what to change —
+ * which is a different thing depending on what the backend refused.
  */
-function backendUnusable(ctx: BootstrapContext): false {
-  log.error(`${ctx.config.model} is not usable on this backend — stopping instead of retrying.`);
-  log.detail("Pick a model that is loaded and fits in memory: pi-harness models, then --model <id>.");
+function backendUnusable(ctx: BootstrapContext, backendError: string): false {
+  log.error(`The backend refused every attempt with ${ctx.config.model} — stopping.`);
+  if (/context/i.test(backendError)) {
+    log.detail(
+      `The prompt did not fit. Serve a bigger window: pi-harness tune-ctx --context ${ctx.config.contextLength * 2}`,
+    );
+    log.detail(
+      "A backend serving several requests at once splits its context between them, so a window that worked alone can overflow.",
+    );
+  } else {
+    log.detail("Pick a model that is loaded and fits in memory: pi-harness models, then --model <id>.");
+  }
   return false;
 }
 
@@ -242,7 +253,7 @@ export async function generateAgentsFile(ctx: BootstrapContext): Promise<boolean
 
     const result = await callPi(ctx, `agents-${attempt}`, prompt, [ctx.config.briefFile]);
     if (result.aborted) return false;
-    if (result.backendError) return backendUnusable(ctx);
+    if (result.backendError) return backendUnusable(ctx, result.backendError);
     if (result.timedOut) {
       log.warn("Timed out while writing the architecture doc.");
       continue;
@@ -275,7 +286,7 @@ export async function generateSpecFile(ctx: BootstrapContext): Promise<boolean> 
       ctx.config.agentsFile,
     ]);
     if (result.aborted) return false;
-    if (result.backendError) return backendUnusable(ctx);
+    if (result.backendError) return backendUnusable(ctx, result.backendError);
 
     rescueMisplacedFile(ctx, ctx.config.specFile);
     if (!existsSync(specPath)) {

@@ -2,11 +2,13 @@ export interface PiEvent {
     type: string;
     toolName?: string;
     isError?: boolean;
+    args?: Record<string, unknown>;
     message?: {
         role?: string;
         content?: Array<{
             type?: string;
             text?: string;
+            thinking?: string;
         }>;
         usage?: {
             input?: number;
@@ -54,7 +56,18 @@ export interface PiOptions {
     saveSession?: boolean;
     sessionName?: string;
     rawPath: string;
+    /** Stream the model's reasoning, replies and tool calls to the terminal. */
+    watch?: boolean;
 }
+/**
+ * Live view of a turn.
+ *
+ * pi re-sends the WHOLE message on every `message_update`, so printing an
+ * update verbatim reprints everything written so far. Each content part is
+ * tracked by index and only the new tail is emitted, which turns the stream
+ * back into something that reads like typing.
+ */
+export declare function createWatcher(write?: (s: string) => void): (event: PiEvent) => void;
 export declare function parseEvents(jsonl: string): PiEvent[];
 /**
  * pi reports a failed request inside the event stream, not through its exit
