@@ -229,9 +229,23 @@ same prompt, four models:
 | `qwen3.5:latest` | 6.2 GB | executes tools, but stalled >10 min reasoning on the first prompt |
 | `gemma4:e4b` | 3.3 GB | **best of the four** — full project, 2/3 features genuinely implemented and tested |
 
-**32 GB unified memory (Apple M1 Pro)** is a different world. A 26B MoE model
-like `gemma-4-26b-a4b-qat` uses ~15.6 GB at 32k context and only activates ~4B
-parameters per token, so it is both capable and fast.
+**32 GB unified memory (Apple M1 Pro, LM Studio)** is a different world. Full
+`build` from a one-line idea with `qwen3.5-9b` at 32k context:
+
+```
+✔ #1  COMPLETED  Implement mean calculation
+✔ #2  COMPLETED  Implement median calculation
+✔ #3  COMPLETED  Implement standard deviation calculation
+total=3  completed=3  unverified=0  failed=0  pending=0
+```
+
+22 tests passing, a separate test file per feature, six clean commits — and the
+functions are genuinely right (`stdev` matches `statistics.stdev`, empty input
+raises `ValueError`). About 35 minutes end to end including the scaffold.
+
+`gemma-4-26b-a4b-qat` also fits comfortably (~15.6 GB at 32k, ~4B active
+parameters per token) and is the better choice for harder projects, though it
+reasons heavily — see the thinking trap above.
 
 Rules of thumb:
 
@@ -306,6 +320,10 @@ legacy-bash/      the original bash implementation, kept for reference
 - **The model can contradict its own AGENTS.md.** In one run it declared the
   layout as `csv2json/` and then wrote everything into `src/`. Tests still
   passed, but the doc was lying. Skim AGENTS.md before a long run.
+- **Stray directories from absolute paths.** A model given an absolute path
+  sometimes recreates it as a relative tree, leaving something like
+  `./private/tmp/.../project/tests/` beside the real one. Harmless — the tests
+  and the build ignore it — but worth deleting after a run.
 - **No loop rescues a bad backlog.** If features come out huge or badly ordered,
   edit `PROJECT_SPEC.md` by hand before `run`. It is plain text for that reason.
 - **`UNVERIFIED` is not `COMPLETED`.** With no tests, nothing is guaranteed.
