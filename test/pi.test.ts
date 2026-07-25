@@ -1,0 +1,184 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { analyzeEvents, extractHints, parseEvents, registerModel } from "../src/pi.js";
+
+let dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "pi-test-"));
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const event = (o: unknown) => JSON.stringify(o);
+
+describe("event stream analysis", () => {
+  it("ignores non-JSON noise in the stream", () => {
+    const events = parseEvents(
+      ["not json", event({ type: "agent_start" }), "", "{broken"].join("\n"),
+    );
+    expect(events).toHaveLength(1);
+  });
+
+  it("counts successful write-tool calls", () => {
+    const events = parseEvents(
+      [
+        event({ type: "tool_execution_end", toolName: "write", isError: false }),
+        event({ type: "tool_execution_end", toolName: "edit", isError: false }),
+        event({ type: "tool_execution_end", toolName: "read", isError: false }),
+      ].join("\n"),
+    );
+    expect(analyzeEvents(events).writeCalls).toBe(2);
+  });
+
+  it("does not count a failed write as work done", () => {
+    const events = parseEvents(
+      event({ type: "tool_execution_end", toolName: "write", isError: true }),
+    );
+    const a = analyzeEvents(events);
+    expect(a.writeCalls).toBe(0);
+    expect(a.toolErrors).toBe(1);
+  });
+
+  it("detects the model that describes instead of writing", () => {
+    // Exit code 0, plausible prose, zero tools: the most common local-model
+    // failure and invisible without this check.
+    const events = parseEvents(
+      [
+        event({ type: "agent_start" }),
+        event({
+          type: "turn_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "You would create a file called impl.py..." }],
+            usage: { totalTokens: 900 },
+          },
+        }),
+      ].join("\n"),
+    );
+    expect(analyzeEvents(events).writeCalls).toBe(0);
+  });
+
+  it("reports peak token usage", () => {
+    const events = parseEvents(
+      [
+        event({ type: "turn_end", message: { usage: { totalTokens: 1200 } } }),
+        event({ type: "turn_end", message: { usage: { totalTokens: 8400 } } }),
+      ].join("\n"),
+    );
+    expect(analyzeEvents(events).totalTokens).toBe(8400);
+  });
+
+  it("extracts the final assistant text", () => {
+    const events = parseEvents(
+      event({
+        type: "agent_end",
+        messages: [{ role: "assistant", content: [{ type: "text", text: "all done" }] }],
+      }),
+    );
+    expect(analyzeEvents(events).finalText).toBe("all done");
+  });
+});
+
+describe("backend hints", () => {
+  it("flags context overflow, the failure that produces no error", () => {
+    expect(extractHints('{"error":"context length exceeded"}')[0]).toMatch(/context window/);
+  });
+  it("flags a missing model and a dead server", () => {
+    expect(extractHints("model xyz not found").join()).toMatch(/not found/);
+    expect(extractHints("connect ECONNREFUSED").join()).toMatch(/not reachable/);
+  });
+  it("says nothing when the stream is clean", () => {
+    expect(extractHints('{"type":"agent_end"}')).toEqual([]);
+  });
+});
+
+describe("registering a model with pi", () => {
+  it("creates models.json when absent", () => {
+    const path = join(dir, "models.json");
+    registerModel(path, {
+      providerName: "lmstudio",
+      baseUrl: "http://localhost:1234/v1",
+      modelId: "google/gemma-4-26b",
+      contextWindow: 32768,
+      maxTokens: 8192,
+      reasoning: false,
+      compat: { supportsDeveloperRole: false },
+    });
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    expect(data.providers.lmstudio.baseUrl).toBe("http://localhost:1234/v1");
+    expect(data.providers.lmstudio.models[0].id).toBe("google/gemma-4-26b");
+    expect(data.providers.lmstudio.compat.supportsDeveloperRole).toBe(false);
+  });
+
+  it("merges without destroying other providers or settings", () => {
+    const path = join(dir, "models.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        providers: { other: { baseUrl: "http://x/v1", models: [{ id: "keepme" }] } },
+        defaultModel: "keepme",
+      }),
+    );
+    registerModel(path, {
+      providerName: "ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      modelId: "qwen3:8b",
+      contextWindow: 32768,
+      maxTokens: 8192,
+      reasoning: false,
+    });
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    expect(data.providers.other.models[0].id).toBe("keepme");
+    expect(data.defaultModel).toBe("keepme");
+    expect(data.providers.ollama.models[0].id).toBe("qwen3:8b");
+  });
+
+  it("replaces an existing entry for the same model instead of duplicating", () => {
+    const path = join(dir, "models.json");
+    const reg = {
+      providerName: "ollama",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      modelId: "qwen3:8b",
+      contextWindow: 8192,
+      maxTokens: 4096,
+      reasoning: false,
+    };
+    registerModel(path, reg);
+    registerModel(path, { ...reg, contextWindow: 32768 });
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    expect(data.providers.ollama.models).toHaveLength(1);
+    expect(data.providers.ollama.models[0].contextWindow).toBe(32768);
+  });
+
+  it("makes a backup before overwriting", () => {
+    const path = join(dir, "models.json");
+    writeFileSync(path, JSON.stringify({ providers: {} }));
+    const { backupPath } = registerModel(path, {
+      providerName: "ollama",
+      baseUrl: "http://x/v1",
+      modelId: "m",
+      contextWindow: 1,
+      maxTokens: 1,
+      reasoning: false,
+    });
+    expect(backupPath).toBeTruthy();
+    expect(readFileSync(backupPath!, "utf8")).toContain("providers");
+  });
+
+  it("refuses to touch a corrupt models.json rather than destroying it", () => {
+    const path = join(dir, "models.json");
+    writeFileSync(path, "{ this is not json");
+    expect(() =>
+      registerModel(path, {
+        providerName: "ollama",
+        baseUrl: "http://x/v1",
+        modelId: "m",
+        contextWindow: 1,
+        maxTokens: 1,
+        reasoning: false,
+      }),
+    ).toThrow(/not valid JSON/);
+    expect(readFileSync(path, "utf8")).toBe("{ this is not json");
+  });
+});

@@ -1,0 +1,70 @@
+# ==============================================================================
+#  harness.conf — copiá esto a ./harness.conf en la raíz del proyecto
+# ------------------------------------------------------------------------------
+#  Se carga como shell script. Todo lo de acá se puede pisar por entorno:
+#      MAX_RETRIES=8 ./pi-harness.sh run
+# ==============================================================================
+
+# --- Modelo -------------------------------------------------------------------
+OLLAMA_URL="http://127.0.0.1:11434"
+OLLAMA_MODEL="qwen3-coder:30b"       # el que le pasás a `ollama pull`
+PI_PROVIDER="ollama"                 # nombre del provider dentro de pi
+PI_MODEL="$OLLAMA_MODEL"
+
+# Ventana que pi ASUME. Ojo: no cambia el num_ctx real de Ollama.
+# Para eso: ./pi-harness.sh tune-ctx <modelo> 32768
+MODEL_CONTEXT=32768
+MODEL_MAXOUT=8192
+
+# La mayoría de los modelos locales de coding no razonan por pasos. Si el tuyo
+# sí (gpt-oss, qwen3 con thinking), poné MODEL_REASONING=true y subí esto.
+MODEL_REASONING=false
+PI_THINKING="off"                    # off|minimal|low|medium|high|xhigh|max
+
+# --- Archivos -----------------------------------------------------------------
+SPEC_FILE="PROJECT_SPEC.md"
+AGENTS_FILE="AGENTS.md"
+STATE_DIR=".harness"
+
+# --- Verificación -------------------------------------------------------------
+# Vacío = usa .harness/test_cmd (lo escribe el agente en el andamiaje) y, si no
+# está, autodetecta. Ponelo sólo si querés forzar un comando concreto.
+TEST_COMMAND=""
+
+# Cuántas líneas de salida de tests se le devuelven al modelo cuando falla.
+# Más no es mejor: un stacktrace gigante le tapa el enunciado original.
+TEST_EXCERPT_LINES=60
+
+# --- Loop ---------------------------------------------------------------------
+MAX_RETRIES=4                        # intentos por feature
+MAX_CONSECUTIVE_FAILURES=3           # freno global: algo está roto de raíz
+FEATURE_TIMEOUT="30m"                # por intento de pi
+TEST_TIMEOUT="10m"
+BOOTSTRAP_TIMEOUT="25m"              # fase init/scaffold
+COOLDOWN=10                          # pausa entre features
+FEATURE_TARGET=10                    # tamaño del backlog que pide el init
+BOOTSTRAP_RETRIES=3
+
+# --- Git ----------------------------------------------------------------------
+# Una feature fallida deja imports rotos y archivos a medio escribir. Si eso
+# queda en el árbol, la siguiente arranca sobre escombros y falla también.
+GIT_ROLLBACK_ON_FAIL=1
+GIT_BRANCH=""                        # ej: "harness/build" para no tocar main
+
+# --- VRAM ---------------------------------------------------------------------
+#   auto    descarga el modelo entre features; si no puede, reinicia el servicio
+#   unload  sólo descarga (keep_alive=0). Lo más rápido y sin sudo.
+#   restart reinicia el servicio entero
+#   none    no toca nada (si tenés VRAM de sobra, esto es lo más rápido)
+VRAM_STRATEGY="auto"
+# OLLAMA_RESTART_CMD="brew services restart ollama"
+# OLLAMA_START_CMD="ollama serve"
+
+# --- Debug --------------------------------------------------------------------
+# PI_SAVE_SESSIONS=1                 # guarda las sesiones de pi (ocupan disco)
+# KEEP_TMP=1                         # no borra .harness/tmp: deja los JSONL crudos
+
+# --- Rigor de la verificación -------------------------------------------------
+# Exige que cada feature toque algún archivo de tests. Sin esto, un modelo puede
+# escribir un stub, dejar la suite vieja en verde y llevarse un COMPLETED.
+REQUIRE_TEST_CHANGES=1
