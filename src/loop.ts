@@ -14,6 +14,7 @@ import {
 } from "./prompts.js";
 import { sleep, stopFlag } from "./proc.js";
 import { readSpec, setStatus, type Feature, type FeatureStatus } from "./spec.js";
+import type { Provider } from "./providers/types.js";
 import { formatDuration, log } from "./ui.js";
 import { excerpt, resolveTestCommand, runVerification, type VerifyContext } from "./verify.js";
 
@@ -33,6 +34,11 @@ export interface LoopContext {
   cwd: string;
   config: HarnessConfig;
   tempDir: string;
+  /**
+   * Optional backend handle, used only to free memory between features. The
+   * loop never needs it otherwise, so tests can leave it out.
+   */
+  provider?: Pick<Provider, "unload"> | undefined;
 }
 
 export async function processFeature(
@@ -270,6 +276,12 @@ export async function runLoop(
     if (options.once) {
       log.info("--once: stopping after one feature.");
       return { completed, failed, stoppedBecause: "done" };
+    }
+
+    // Only worth doing when memory is tight: reloading costs real time, so it
+    // stays off by default.
+    if (config.unloadBetweenFeatures && ctx.provider) {
+      if (await ctx.provider.unload(config.model)) log.detail("model unloaded to free memory");
     }
     await sleep(config.cooldown);
   }

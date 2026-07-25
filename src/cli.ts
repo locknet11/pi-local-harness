@@ -434,6 +434,7 @@ async function main(): Promise<number> {
 
   try {
     const ctx: BootstrapContext = { cwd, config, tempDir };
+    const loopCtx = { cwd, config, tempDir, provider };
 
     if (command === "init" || command === "build") {
       const specPath = join(cwd, config.specFile);
@@ -515,7 +516,7 @@ async function main(): Promise<number> {
       `Backlog: ${features.length} features · ${provider.name}/${config.model}`,
     );
 
-    const summary = await runLoop(ctx, {
+    const summary = await runLoop(loopCtx, {
       once: options.once,
       ...(options.feature ? { onlyFeatureId: options.feature } : {}),
     });
