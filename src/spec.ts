@@ -51,6 +51,24 @@ const FEATURE_RE = /^#*\s*feature:\s*(.*)$/i;
 const FIELD_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/;
 const BULLET_RE = /^\s*[-*]\s+(.*)$/;
 
+/**
+ * Strip decoration a model may add around a scalar: quotes, backticks, and the
+ * brackets of list syntax.
+ *
+ * Models reach for `depends: [F001, F002]` constantly — it is valid YAML and
+ * unambiguous to any reader. Rejecting it burned three bootstrap attempts in a
+ * row on pure syntax while the intent was never in doubt. Be liberal here; the
+ * strictness that matters is in the acceptance criteria, not the punctuation.
+ */
+function clean(value: string): string {
+  return value
+    .trim()
+    .replace(/^[[(]\s*/, "")
+    .replace(/\s*[\])]$/, "")
+    .replace(/^["'`]|["'`]$/g, "")
+    .trim();
+}
+
 export function parseSpec(text: string): Feature[] {
   const lines = text.split("\n");
   const features: Feature[] = [];
@@ -97,27 +115,27 @@ export function parseSpec(text: string): Feature[] {
       const value = (field[2] ?? "").trim();
       switch (key) {
         case "id":
-          if (!current.id) current.id = value;
+          if (!current.id) current.id = clean(value);
           collecting = null;
           return;
         case "status":
           if (current.statusLineNo === -1) {
-            current.status = value;
+            current.status = clean(value).toUpperCase();
             current.statusLineNo = i;
           }
           collecting = null;
           return;
         case "depends":
-          if (current.depends.length === 0 && value && !/^(none|-)$/i.test(value)) {
+          if (current.depends.length === 0 && value && !/^\[?\s*(none|-|n\/a)?\s*\]?$/i.test(value)) {
             current.depends = value
               .split(/[,\s]+/)
-              .map((d) => d.trim())
-              .filter(Boolean);
+              .map(clean)
+              .filter((d) => d !== "" && !/^(none|-)$/i.test(d));
           }
           collecting = null;
           return;
         case "test":
-          if (!current.test && value) current.test = value;
+          if (!current.test && value) current.test = clean(value);
           collecting = null;
           return;
         case "acceptance":

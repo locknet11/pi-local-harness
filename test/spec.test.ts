@@ -73,6 +73,63 @@ describe("parsing", () => {
     expect(parseSpec(FIXTURE)[0]?.depends).toEqual([]);
   });
 
+  describe("tolerates the decoration models actually emit", () => {
+    // A real bootstrap failure: the model wrote `depends: [F001]` three times
+    // in a row. It is valid YAML and unambiguous; rejecting it wasted every
+    // retry on punctuation.
+    const withVariants = `## feature: One
+id: "F001"
+status: PENDING
+depends: none
+acceptance:
+  - a
+
+## feature: Two
+id: F002
+status: pending
+depends: [F001]
+acceptance:
+  - b
+
+## feature: Three
+id: \`F003\`
+status: PENDING
+depends: [F001, F002]
+acceptance:
+  - c
+`;
+    it("accepts bracketed dependency lists", () => {
+      const f = parseSpec(withVariants);
+      expect(f[1]?.depends).toEqual(["F001"]);
+      expect(f[2]?.depends).toEqual(["F001", "F002"]);
+    });
+
+    it("strips quotes and backticks from ids", () => {
+      const f = parseSpec(withVariants);
+      expect(f[0]?.id).toBe("F001");
+      expect(f[2]?.id).toBe("F003");
+    });
+
+    it("accepts a lowercase status", () => {
+      expect(parseSpec(withVariants)[1]?.status).toBe("PENDING");
+    });
+
+    it("validates clean, so no retry is wasted on syntax", () => {
+      expect(validateSpec(withVariants)).toEqual([]);
+    });
+
+    it("still treats an empty bracketed list as no dependencies", () => {
+      const f = parseSpec(`## feature: X
+id: F001
+status: PENDING
+depends: []
+acceptance:
+  - a
+`);
+      expect(f[0]?.depends).toEqual([]);
+    });
+  });
+
   it("keeps the raw block for the model prompt", () => {
     const raw = parseSpec(FIXTURE)[0]?.raw ?? "";
     expect(raw).toContain("## feature: Add two numbers");

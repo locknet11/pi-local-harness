@@ -164,7 +164,28 @@ code is 0. The capability flag comes from the chat template, not the model.
 pi-harness probe          # costs one inference, saves an hour
 ```
 
-### 3. A green suite that proves nothing
+### 3. Thinking left on, silently
+
+Modern local models reason before answering. For agentic coding that is mostly
+wasted time: each call pays for a long reasoning dump before touching a file.
+
+The trap is that turning it off requires the backend to receive
+`reasoning_effort`, and the compat flags Ollama needs (`supportsReasoningEffort:
+false`) **stop pi from sending it at all**. Apply those flags to LM Studio —
+which implements the field correctly — and thinking can never be disabled.
+
+Measured with `qwen3.5-9b` on LM Studio:
+
+| `reasoning_effort` | Result |
+|---|---|
+| `minimal`, `low` | still emits a full reasoning pass first |
+| `none` | answers immediately |
+
+`setup-model` handles this: it detects whether the model is reasoning-capable
+with a one-token probe, then registers a `thinkingLevelMap` so pi's `off`
+arrives as `none`. Ollama keeps the compat flags it genuinely needs.
+
+### 4. A green suite that proves nothing
 
 The nastiest one. The model writes code but no tests. The suite still passes —
 because the tests belong to *earlier* features — and the feature is marked
