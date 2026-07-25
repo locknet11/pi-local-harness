@@ -14,14 +14,14 @@ defined **what** to build, and nothing prepared ground that could be verified.
 ## Install
 
 ```bash
-npm install -g github:YOUR_USER/pi-local-llm-harness
+npm install -g github:locknet11/pi-local-harness
 ```
 
 Installing from a git URL runs the TypeScript build automatically (`prepare`).
 For local development:
 
 ```bash
-git clone <this repo> && cd pi-local-llm-harness
+git clone https://github.com/locknet11/pi-local-harness && cd pi-local-harness
 npm install && npm run build
 npm link              # puts `pi-harness` on your PATH
 ```
