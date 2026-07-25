@@ -17,18 +17,20 @@ defined **what** to build, and nothing prepared ground that could be verified.
 npm install -g github:locknet11/pi-local-harness
 ```
 
-Installing from a git URL runs the TypeScript build automatically (`prepare`).
+`dist/` is committed, so the install needs no build step and no toolchain.
 For local development:
 
 ```bash
 git clone https://github.com/locknet11/pi-local-harness && cd pi-local-harness
-npm install           # `prepare` compiles into dist/
+npm install
+npm run compile       # writes dist/ — commit it with your changes
 npm link              # puts `pi-harness` on your PATH
 ```
 
-The compile step is `npm run compile`, not `npm run build`: npm 10 installs a
-git package that has a `build` script as a symlink into its own cache, which
-the next npm command deletes.
+Two rules keep `npm install -g github:…` working, both of them npm 10 bugs
+rather than taste: no `prepare`/`prepack` script, and no script named `build`.
+Either one makes npm install the package as a symlink into `~/.npm/_cacache/tmp`,
+which the next npm command deletes, leaving a dangling `pi-harness`.
 
 You also need the agent itself:
 
