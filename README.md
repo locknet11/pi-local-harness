@@ -22,9 +22,13 @@ For local development:
 
 ```bash
 git clone https://github.com/locknet11/pi-local-harness && cd pi-local-harness
-npm install && npm run build
+npm install           # `prepare` compiles into dist/
 npm link              # puts `pi-harness` on your PATH
 ```
+
+The compile step is `npm run compile`, not `npm run build`: npm 10 installs a
+git package that has a `build` script as a symlink into its own cache, which
+the next npm command deletes.
 
 You also need the agent itself:
 
