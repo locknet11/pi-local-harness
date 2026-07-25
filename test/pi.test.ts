@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -80,16 +80,80 @@ describe("event stream analysis", () => {
   });
 });
 
+describe("streaming log size", () => {
+  it("keeps only actionable events, not per-token updates", async () => {
+    // pi emits a message_update per streamed token, each carrying the whole
+    // message so far. Storing them all produced a 13.7 MB file for ONE call.
+    const { runPi } = await import("../src/pi.js");
+    const fake = join(dir, "fake-pi.cjs");
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node
+const emit = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+emit({ type: "agent_start" });
+const big = "x".repeat(2000);
+for (let i = 0; i < 500; i++) {
+  emit({ type: "message_update", message: { content: [{ type: "text", text: big }] } });
+}
+emit({ type: "tool_execution_end", toolName: "write", isError: false });
+emit({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "done" }] }] });
+`,
+    );
+    chmodSync(fake, 0o755);
+    const rawPath = join(dir, "out.jsonl");
+    const result = await runPi("go", {
+      piBin: fake,
+      provider: "fake",
+      model: "fake",
+      cwd: dir,
+      timeoutSeconds: 60,
+      rawPath,
+    });
+
+    expect(result.writeCalls).toBe(1);
+    expect(result.finalText).toBe("done");
+    // 500 x 2 kB of updates were emitted; the stored log must stay tiny.
+    const stored = readFileSync(rawPath, "utf8");
+    expect(stored.length).toBeLessThan(20_000);
+    expect(stored).not.toContain("message_update");
+  });
+});
+
 describe("backend hints", () => {
-  it("flags context overflow, the failure that produces no error", () => {
+  it("flags context overflow", () => {
     expect(extractHints('{"error":"context length exceeded"}')[0]).toMatch(/context window/);
   });
   it("flags a missing model and a dead server", () => {
-    expect(extractHints("model xyz not found").join()).toMatch(/not found/);
-    expect(extractHints("connect ECONNREFUSED").join()).toMatch(/not reachable/);
+    expect(extractHints('{"error":"model xyz not found"}').join()).toMatch(/not found/);
+    expect(extractHints("Error: connect ECONNREFUSED").join()).toMatch(/not reachable/);
   });
   it("says nothing when the stream is clean", () => {
     expect(extractHints('{"type":"agent_end"}')).toEqual([]);
+  });
+
+  it("does not fire on the model's own reasoning text", () => {
+    // A real false positive: the model reasoning about "invalid roles" and
+    // "context length" made the harness warn about a backend problem that did
+    // not exist. Noisy warnings make the real ones worthless.
+    const thinking = JSON.stringify({
+      type: "turn_end",
+      message: {
+        content: [
+          {
+            type: "thinking",
+            thinking:
+              "I should check the context length of the input and reject any invalid role in the config parser.",
+          },
+        ],
+      },
+    });
+    expect(extractHints(thinking)).toEqual([]);
+  });
+
+  it("still fires when a genuine error mentions the same words", () => {
+    expect(
+      extractHints('{"error":{"message":"unsupported parameter: reasoning_effort"}}').join(),
+    ).toMatch(/compat flags/);
   });
 });
 

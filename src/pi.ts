@@ -112,18 +112,65 @@ export function analyzeEvents(events: PiEvent[]): {
 }
 
 const HINT_PATTERNS: Array<[RegExp, string]> = [
-  [/context length|context window|too many tokens|maximum context/i, "context window exceeded — raise the served context length"],
-  [/model .{0,40}not found|no such model/i, "model not found on the backend"],
+  [
+    /(context (length|window)|maximum context).{0,40}(exceed|too (long|large|many)|overflow)|exceeds? the (maximum )?context/i,
+    "context window exceeded — raise the served context length",
+  ],
+  [/"?model"?[^\n]{0,40}\b(not found|does not exist|unknown model)/i, "model not found on the backend"],
   [/ECONNREFUSED|connection refused/i, "connection refused — the inference server is not reachable"],
-  [/rate limit/i, "rate limited by the backend"],
-  [/unsupported|invalid.{0,20}role|developer role/i, "the backend rejected a request field (check the pi compat flags)"],
+  [/\brate.?limit(ed|ing)?\b/i, "rate limited by the backend"],
+  [
+    /(unsupported|unrecognized|invalid)[^\n]{0,40}\b(developer|role|reasoning_effort|parameter)\b/i,
+    "the backend rejected a request field (check the pi compat flags)",
+  ],
 ];
 
+/**
+ * Backend problems worth surfacing.
+ *
+ * Only lines that actually look like errors are scanned. The model's own
+ * reasoning text routinely contains words like "invalid" and "context length",
+ * and matching those produced confident warnings about problems that did not
+ * exist — noise that makes the real warnings worthless.
+ */
 export function extractHints(raw: string): string[] {
   const hints = new Set<string>();
-  for (const [re, message] of HINT_PATTERNS) if (re.test(raw)) hints.add(message);
+  const errorish = raw
+    .split("\n")
+    .filter((line) => /\b(error|err|failed|failure|exception|status.?[45]\d\d)\b/i.test(line))
+    .join("\n");
+  if (errorish === "") return [];
+  for (const [re, message] of HINT_PATTERNS) if (re.test(errorish)) hints.add(message);
   return [...hints];
 }
+
+/**
+ * Events worth keeping.
+ *
+ * pi emits a `message_update` per streamed token, and each one carries the
+ * ENTIRE message so far — so a single long turn produced a 13.7 MB log in
+ * testing. Keeping all of it means quadratic disk growth and re-parsing
+ * megabytes of JSON for a handful of numbers. Only these types carry
+ * information the harness acts on.
+ */
+const KEEP_EVENT_TYPES = new Set([
+  "session",
+  "agent_start",
+  "turn_start",
+  "turn_end",
+  "tool_execution_start",
+  "tool_execution_end",
+  "agent_end",
+  "agent_settled",
+  "compaction_start",
+  "compaction_end",
+  "auto_retry_start",
+  "auto_retry_end",
+  "error",
+]);
+
+/** Text scanned for backend hints; bounded so a runaway turn cannot eat RAM. */
+const HINT_BUFFER_LIMIT = 256 * 1024;
 
 export async function runPi(prompt: string, options: PiOptions): Promise<PiRunResult> {
   const args = ["-p", "--mode", "json", "--approve"];
@@ -142,29 +189,60 @@ export async function runPi(prompt: string, options: PiOptions): Promise<PiRunRe
   for (const file of options.attachments ?? []) args.push(`@${file}`);
   args.push(prompt); // the whole prompt as a single argument
 
+  // Parse while streaming and keep only the events that matter, instead of
+  // buffering every token-level update and re-reading it afterwards.
+  const events: PiEvent[] = [];
+  let pending = "";
+  let hintBuffer = "";
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim();
+    if (trimmed === "") return;
+    if (hintBuffer.length < HINT_BUFFER_LIMIT) {
+      hintBuffer += trimmed.slice(0, 4096) + "\n";
+    }
+    if (!trimmed.startsWith("{")) return;
+    let event: PiEvent;
+    try {
+      event = JSON.parse(trimmed) as PiEvent;
+    } catch {
+      return;
+    }
+    if (KEEP_EVENT_TYPES.has(event.type)) events.push(event);
+  };
+
   const result = await run(options.piBin, args, {
     cwd: options.cwd,
     timeoutSeconds: options.timeoutSeconds,
-    outFile: options.rawPath,
+    onStdout: (chunk) => {
+      pending += chunk;
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) consumeLine(line);
+    },
   });
+  consumeLine(pending);
 
-  let raw = "";
-  try {
-    raw = readFileSync(options.rawPath, "utf8");
-  } catch {
-    raw = result.stdout;
+  // Anything the child wrote to stderr never reaches onStdout.
+  if (result.stderr) {
+    hintBuffer += result.stderr.slice(0, HINT_BUFFER_LIMIT);
   }
-  const events = parseEvents(raw);
-  const analysis = analyzeEvents(events);
+
+  // Persist the filtered stream for debugging; orders of magnitude smaller.
+  try {
+    writeFileSync(options.rawPath, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  } catch {
+    /* diagnostics only */
+  }
 
   return {
     code: result.code,
     timedOut: result.timedOut,
     aborted: result.aborted,
-    ...analysis,
+    ...analyzeEvents(events),
     events,
     rawPath: options.rawPath,
-    hints: extractHints(raw),
+    hints: extractHints(hintBuffer),
   };
 }
 
