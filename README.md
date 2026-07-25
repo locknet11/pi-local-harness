@@ -21,7 +21,7 @@ Installing from a git URL runs the TypeScript build automatically (`prepare`).
 For local development:
 
 ```bash
-git clone https://github.comlocknet11/pi-local-harness && cd pi-local-harness
+git clone https://github.com/locknet11/pi-local-harness.git && cd pi-local-harness
 npm install && npm run build
 npm link              # puts `pi-harness` on your PATH
 ```
