@@ -35,6 +35,8 @@ const DEFAULTS = {
     saveSessions: false,
     keepTemp: false,
     watch: false,
+    isolatePi: true,
+    offline: true,
 };
 export const CONFIG_FILENAME = "harness.config.json";
 const bool = (v, fallback) => {
@@ -90,6 +92,12 @@ export function loadConfig(projectDir, overrides = {}) {
             ? { saveSessions: bool(env["SAVE_SESSIONS"], DEFAULTS.saveSessions) }
             : {}),
         ...(env["HARNESS_WATCH"] !== undefined ? { watch: bool(env["HARNESS_WATCH"], DEFAULTS.watch) } : {}),
+        ...(env["HARNESS_ISOLATE_PI"] !== undefined
+            ? { isolatePi: bool(env["HARNESS_ISOLATE_PI"], DEFAULTS.isolatePi) }
+            : {}),
+        ...(env["HARNESS_OFFLINE"] !== undefined
+            ? { offline: bool(env["HARNESS_OFFLINE"], DEFAULTS.offline) }
+            : {}),
     };
     const merged = { ...DEFAULTS, ...fileConfig, ...envConfig, ...overrides };
     // Keep derived paths consistent when stateDir is customised.

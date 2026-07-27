@@ -373,6 +373,65 @@ describe("registering a model with pi", () => {
   });
 });
 
+describe("isolating the pi subprocess", () => {
+  // A fake pi that records the arguments it was given, so the harness's lean
+  // defaults can be asserted directly. Without these flags pi injects every
+  // installed skill into the system prompt and scans for extensions on startup
+  // — context and latency the harness does not want on any call.
+  const argvRecorder = (dir: string, name: string, outFile: string): string => {
+    const fake = join(dir, name);
+    writeFileSync(
+      fake,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(outFile)}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(JSON.stringify({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }] }) + "\\n");
+`,
+    );
+    chmodSync(fake, 0o755);
+    return fake;
+  };
+
+  it("disables discovery and startup network by default", async () => {
+    const { runPi } = await import("../src/pi.js");
+    const argvPath = join(dir, "argv-default.json");
+    const fake = argvRecorder(dir, "fake-pi-argv.cjs", argvPath);
+    await runPi("go", {
+      piBin: fake,
+      provider: "fake",
+      model: "fake",
+      cwd: dir,
+      timeoutSeconds: 60,
+      rawPath: join(dir, "argv-default.jsonl"),
+    });
+    const argv = JSON.parse(readFileSync(argvPath, "utf8")) as string[];
+    expect(argv).toContain("--no-extensions");
+    expect(argv).toContain("--no-skills");
+    expect(argv).toContain("--no-prompt-templates");
+    expect(argv).toContain("--no-themes");
+    expect(argv).toContain("--offline");
+  });
+
+  it("lets a caller opt back into discovery and network", async () => {
+    const { runPi } = await import("../src/pi.js");
+    const argvPath = join(dir, "argv-optout.json");
+    const fake = argvRecorder(dir, "fake-pi-argv-optout.cjs", argvPath);
+    await runPi("go", {
+      piBin: fake,
+      provider: "fake",
+      model: "fake",
+      cwd: dir,
+      timeoutSeconds: 60,
+      rawPath: join(dir, "argv-optout.jsonl"),
+      isolate: false,
+      offline: false,
+    });
+    const argv = JSON.parse(readFileSync(argvPath, "utf8")) as string[];
+    expect(argv).not.toContain("--no-skills");
+    expect(argv).not.toContain("--offline");
+  });
+});
+
 describe("watching a turn live", () => {
   const capture = () => {
     let out = "";

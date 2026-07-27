@@ -58,6 +58,24 @@ export interface PiOptions {
     rawPath: string;
     /** Stream the model's reasoning, replies and tool calls to the terminal. */
     watch?: boolean;
+    /**
+     * Run pi with discovery of skills, extensions, prompt templates and themes
+     * turned off. Default true.
+     *
+     * pi injects the name+description of EVERY installed skill into the system
+     * prompt of every session, and loads discovered extensions on startup. On a
+     * machine that has a handful of global skills that is a few hundred tokens of
+     * irrelevant context re-sent on every feature call, plus the startup cost of
+     * scanning for them dozens of times per build. The harness wants only its own
+     * prompt and the files it attaches, so discovery is off unless asked for.
+     */
+    isolate?: boolean;
+    /**
+     * Skip pi's startup network operations (catalog/update checks). Default true:
+     * the backends this harness drives are local, and the model is pinned with
+     * --provider/--model, so nothing at startup needs the network.
+     */
+    offline?: boolean;
 }
 /**
  * Live view of a turn.

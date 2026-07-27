@@ -206,6 +206,13 @@ const KEEP_EVENT_TYPES = new Set([
 const HINT_BUFFER_LIMIT = 256 * 1024;
 export async function runPi(prompt, options) {
     const args = ["-p", "--mode", "json", "--approve"];
+    // Keep each call lean and deterministic: no ambient skills/extensions in the
+    // system prompt, no startup network. Both default on; opt out per call.
+    if (options.isolate ?? true) {
+        args.push("--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes");
+    }
+    if (options.offline ?? true)
+        args.push("--offline");
     if (options.provider)
         args.push("--provider", options.provider);
     if (options.model)

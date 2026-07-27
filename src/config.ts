@@ -41,6 +41,13 @@ export interface HarnessConfig {
   keepTemp: boolean;
   /** Stream the model's reasoning and replies to the terminal while it works. */
   watch: boolean;
+  /**
+   * Run pi with skill/extension/template/theme discovery disabled. Keeps the
+   * system prompt to just pi's core instructions plus what the harness attaches.
+   */
+  isolatePi: boolean;
+  /** Skip pi's startup network operations (catalog/update checks). */
+  offline: boolean;
 }
 
 const DEFAULTS: HarnessConfig = {
@@ -77,6 +84,8 @@ const DEFAULTS: HarnessConfig = {
   saveSessions: false,
   keepTemp: false,
   watch: false,
+  isolatePi: true,
+  offline: true,
 };
 
 export const CONFIG_FILENAME = "harness.config.json";
@@ -133,6 +142,12 @@ export function loadConfig(projectDir: string, overrides: Partial<HarnessConfig>
       ? { saveSessions: bool(env["SAVE_SESSIONS"], DEFAULTS.saveSessions) }
       : {}),
     ...(env["HARNESS_WATCH"] !== undefined ? { watch: bool(env["HARNESS_WATCH"], DEFAULTS.watch) } : {}),
+    ...(env["HARNESS_ISOLATE_PI"] !== undefined
+      ? { isolatePi: bool(env["HARNESS_ISOLATE_PI"], DEFAULTS.isolatePi) }
+      : {}),
+    ...(env["HARNESS_OFFLINE"] !== undefined
+      ? { offline: bool(env["HARNESS_OFFLINE"], DEFAULTS.offline) }
+      : {}),
   };
 
   const merged: HarnessConfig = { ...DEFAULTS, ...fileConfig, ...envConfig, ...overrides };

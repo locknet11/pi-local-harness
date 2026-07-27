@@ -31,6 +31,13 @@ export interface HarnessConfig {
     keepTemp: boolean;
     /** Stream the model's reasoning and replies to the terminal while it works. */
     watch: boolean;
+    /**
+     * Run pi with skill/extension/template/theme discovery disabled. Keeps the
+     * system prompt to just pi's core instructions plus what the harness attaches.
+     */
+    isolatePi: boolean;
+    /** Skip pi's startup network operations (catalog/update checks). */
+    offline: boolean;
 }
 export declare const CONFIG_FILENAME = "harness.config.json";
 export declare function loadConfig(projectDir: string, overrides?: Partial<HarnessConfig>): HarnessConfig;

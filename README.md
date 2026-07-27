@@ -208,6 +208,13 @@ Context is the scarce resource:
   window with stale noise and the model truncates what matters.
 - **AGENTS.md is never attached** — pi discovers it automatically; attaching it
   would double the cost.
+- **Discovery is switched off.** Every pi call runs with
+  `--no-skills --no-extensions --no-prompt-templates --no-themes --offline`.
+  Otherwise pi injects the name+description of every globally installed skill
+  into the system prompt of every feature call and scans for extensions on each
+  startup — context and latency the harness never wants. Opt back in with
+  `isolatePi: false` / `offline: false` if you deliberately rely on a global
+  skill or extension.
 - **One feature per call**, never the whole backlog.
 - **One file per call** during bootstrap. Asked for AGENTS.md and
   PROJECT_SPEC.md in one turn, small models write the first, describe the second
@@ -279,6 +286,8 @@ defaults < file < environment < CLI flags.
 | `rollbackOnFail` | `true` | Undo a failed feature's mess |
 | `testCommand` | `""` | Force a command instead of using the declared one |
 | `gitBranch` | `""` | Work on a branch instead of the current one |
+| `isolatePi` | `true` | Run pi with skill/extension/template/theme discovery off |
+| `offline` | `true` | Skip pi's startup network (catalog/update checks) |
 
 ## Feature states
 
@@ -294,7 +303,7 @@ automatically on the next start.
 ## Tests
 
 ```bash
-npm test        # 91 tests, no network, no GPU, no tokens
+npm test        # 123 tests, no network, no GPU, no tokens
 ```
 
 They run the orchestrator against a **fake pi**: state transitions, retries,

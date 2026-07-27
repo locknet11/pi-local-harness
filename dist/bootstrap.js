@@ -142,6 +142,8 @@ async function callPi(ctx, tag, prompt, attachments) {
         sessionName: `harness-${tag}`,
         rawPath: join(ctx.tempDir, `pi.${tag}.jsonl`),
         watch: ctx.config.watch,
+        isolate: ctx.config.isolatePi,
+        offline: ctx.config.offline,
     });
     log.detail(`tools: ${result.writeCalls} writes, ${result.toolErrors} errors · ~${result.totalTokens} tokens · exit ${result.code}`);
     // pi exits 0 even when every request failed, so the error in the event stream
