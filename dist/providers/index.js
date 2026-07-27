@@ -1,10 +1,12 @@
 /** Provider registry and auto-detection. */
+import { CloudProvider, findCloudProvider, readCloudProviders } from "./cloud.js";
 import { LMStudioProvider } from "./lmstudio.js";
 import { OllamaProvider } from "./ollama.js";
 import { findPiProvider, PiRegisteredProvider, readPiProviders } from "./piconfig.js";
 export * from "./types.js";
 export { OllamaProvider } from "./ollama.js";
 export { LMStudioProvider, findLmsBinary } from "./lmstudio.js";
+export { CloudProvider, credentialStatus, findCloudProvider, piAuthJsonPath, piModelsStorePath, readCloudProviders, } from "./cloud.js";
 export { findPiProvider, piModelsJsonPath, PiRegisteredProvider, readPiProviders, } from "./piconfig.js";
 export function createProvider(name) {
     switch (name) {
@@ -17,9 +19,17 @@ export function createProvider(name) {
             const fromPi = findPiProvider(name);
             if (fromPi)
                 return new PiRegisteredProvider(fromPi);
-            const known = readPiProviders().map((p) => p.name);
+            // Or a hosted provider pi knows natively (opencode-go, openrouter, …),
+            // whose catalog lives in models-store.json rather than models.json.
+            const cloud = findCloudProvider(name);
+            if (cloud)
+                return new CloudProvider(cloud);
+            const known = [
+                ...readPiProviders().map((p) => p.name),
+                ...readCloudProviders().map((p) => p.name),
+            ];
             throw new Error(`Unknown provider "${name}". Built in: ollama, lmstudio.` +
-                (known.length > 0 ? ` Configured in pi: ${known.join(", ")}.` : ""));
+                (known.length > 0 ? ` Known to pi: ${[...new Set(known)].join(", ")}.` : ""));
         }
     }
 }

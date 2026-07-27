@@ -107,6 +107,26 @@ differs — listing models, controlling context, freeing memory — is behind a
 provider interface. Omit `--provider` and the harness picks whichever backend is
 actually running.
 
+### Cloud providers (opencode-go, openrouter)
+
+The harness can also drive hosted providers that pi knows natively. These are
+not local servers — pi dials the endpoint and handles auth itself — so the
+harness manages nothing: no starting, no loading, no unloading. Credentials
+come from wherever pi keeps them, in this order:
+
+1. `~/.pi/agent/auth.json` (after `pi /login opencode-go` or `pi /login openrouter`)
+2. the environment variable (`OPENCODE_API_KEY`, `OPENROUTER_API_KEY`)
+
+```bash
+pi /login opencode-go          # one-time, interactive
+pi-harness run --provider opencode-go --model deepseek-v4-pro --context 200000
+```
+
+Context windows are read from pi's cached catalog (`~/.pi/agent/models-store.json`),
+so `doctor` can still warn about a too-small window. Run `pi` online once to
+refresh that cache if a model looks wrong. `setup-model` is not needed — these
+providers never touch `models.json`.
+
 ### LM Studio
 
 ```bash
@@ -274,7 +294,7 @@ defaults < file < environment < CLI flags.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `provider` | auto-detected | `lmstudio` or `ollama` |
+| `provider` | auto-detected | `lmstudio`, `ollama`, or a cloud provider (`opencode-go`, `openrouter`) |
 | `model` | largest available | Model id as the backend names it |
 | `contextLength` | `32768` | Context the model must be served with |
 | `maxRetries` | `4` | Attempts per feature |

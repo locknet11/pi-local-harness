@@ -2,6 +2,7 @@ import type { Provider } from "./types.js";
 export * from "./types.js";
 export { OllamaProvider } from "./ollama.js";
 export { LMStudioProvider, findLmsBinary } from "./lmstudio.js";
+export { CloudProvider, credentialStatus, findCloudProvider, piAuthJsonPath, piModelsStorePath, readCloudProviders, type CloudModel, type CloudProviderInfo, type CredentialStatus, } from "./cloud.js";
 export { findPiProvider, piModelsJsonPath, PiRegisteredProvider, readPiProviders, type PiConfigModel, type PiConfigProvider, } from "./piconfig.js";
 export type ProviderName = "ollama" | "lmstudio";
 export declare function createProvider(name: string): Provider;

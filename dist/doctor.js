@@ -10,7 +10,7 @@ import { join } from "node:path";
 import * as git from "./git.js";
 import { piSeesModel, probeToolCalling } from "./pi.js";
 import { commandExecutable, run } from "./proc.js";
-import { formatBytes } from "./providers/index.js";
+import { formatBytes, CloudProvider } from "./providers/index.js";
 import { piModelsJsonPath } from "./providers/piconfig.js";
 import { validateSpec } from "./spec.js";
 import { color } from "./ui.js";
@@ -46,7 +46,7 @@ export async function diagnose(cwd, config, provider, options = {}) {
     if (health.running) {
         backend.push({
             level: "ok",
-            message: `${provider.displayName} is up at ${provider.baseUrl} (${health.detail})`,
+            message: `${provider.displayName} is up${provider.baseUrl ? ` at ${provider.baseUrl}` : ""} (${health.detail})`,
         });
         const models = await provider.listModels();
         const loaded = await provider.listLoaded().catch(() => []);
@@ -58,7 +58,8 @@ export async function diagnose(cwd, config, provider, options = {}) {
             });
             // On disk is not the same as runnable: loading it may still be refused
             // for want of memory, and that only shows up on the first inference.
-            if (!loaded.some((l) => l.id === config.model)) {
+            // A hosted endpoint has nothing to load, so skip this for cloud providers.
+            if (!(provider instanceof CloudProvider) && !loaded.some((l) => l.id === config.model)) {
                 backend.push({
                     level: "warn",
                     message: `'${config.model}' is not loaded — the backend has to load it on the first request`,
@@ -110,8 +111,15 @@ export async function diagnose(cwd, config, provider, options = {}) {
     sections.push({ title: `Backend — ${provider.displayName}`, checks: backend });
     // --- pi wiring ---
     const wiring = [];
+    const isCloud = provider instanceof CloudProvider;
     const modelsJson = piModelsJsonPath();
-    if (existsSync(modelsJson)) {
+    if (isCloud) {
+        wiring.push({
+            level: "ok",
+            message: `${provider.name} is a built-in cloud provider — models.json not required`,
+        });
+    }
+    else if (existsSync(modelsJson)) {
         try {
             JSON.parse(readFileSync(modelsJson, "utf8"));
             wiring.push({ level: "ok", message: `models.json: ${modelsJson}` });
